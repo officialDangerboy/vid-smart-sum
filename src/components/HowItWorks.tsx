@@ -41,7 +41,7 @@ const HowItWorks = () => {
                 key={index}
                 className="glass rounded-2xl p-8 hover:scale-105 transition-transform duration-300 gradient-border"
               >
-                <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center mb-6 glow-purple">
+                <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center mb-6 glow-red">
                   <Icon className="w-8 h-8 text-white" />
                 </div>
                 <h3 className="text-2xl font-semibold mb-3">{step.title}</h3>

@@ -56,13 +56,13 @@ const Pricing = () => {
               key={index}
               className={`glass rounded-3xl p-8 ${
                 plan.popular
-                  ? "gradient-border glow-purple scale-105 md:scale-110"
+                  ? "gradient-border glow-red scale-105 md:scale-110"
                   : ""
               } transition-all duration-300 hover:scale-105`}
             >
               {plan.popular && (
                 <div className="text-center mb-4">
-                  <span className="inline-block px-4 py-1 rounded-full text-sm font-semibold bg-gradient-to-r from-primary to-secondary text-white">
+                  <span className="inline-block px-4 py-1 rounded-full text-sm font-semibold bg-gradient-to-r from-primary to-accent text-white">
                     Most Popular
                   </span>
                 </div>
@@ -91,7 +91,7 @@ const Pricing = () => {
               <Button
                 className={`w-full ${
                   plan.popular
-                    ? "bg-gradient-to-r from-primary to-secondary hover:opacity-90"
+                    ? "bg-gradient-to-r from-primary to-accent hover:opacity-90"
                     : "glass hover:bg-accent/10"
                 }`}
                 size="lg"

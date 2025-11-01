@@ -11,7 +11,7 @@ const Footer = () => {
         <div className="grid md:grid-cols-4 gap-8 mb-12">
           <div className="md:col-span-2">
             <div className="flex items-center gap-2 mb-4">
-              <div className="p-2 rounded-lg bg-gradient-to-br from-primary to-secondary">
+              <div className="p-2 rounded-lg bg-gradient-to-br from-primary to-accent">
                 <Youtube className="w-6 h-6 text-white" />
               </div>
               <span className="text-xl font-bold gradient-text">YouTube AI Summarizer</span>

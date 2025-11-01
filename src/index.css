@@ -8,49 +8,50 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    --background: 240 10% 8%;
-    --foreground: 240 10% 98%;
+    --background: 0 0% 9%;
+    --foreground: 0 0% 98%;
 
-    --card: 240 10% 12%;
-    --card-foreground: 240 10% 98%;
+    --card: 0 0% 12%;
+    --card-foreground: 0 0% 98%;
 
-    --popover: 240 10% 10%;
-    --popover-foreground: 240 10% 98%;
+    --popover: 0 0% 10%;
+    --popover-foreground: 0 0% 98%;
 
-    --primary: 270 80% 65%;
-    --primary-foreground: 240 10% 98%;
+    --primary: 0 100% 50%;
+    --primary-foreground: 0 0% 98%;
 
-    --secondary: 220 90% 60%;
-    --secondary-foreground: 240 10% 98%;
+    --secondary: 0 85% 45%;
+    --secondary-foreground: 0 0% 98%;
 
-    --muted: 240 10% 20%;
-    --muted-foreground: 240 5% 65%;
+    --muted: 0 0% 20%;
+    --muted-foreground: 0 0% 65%;
 
-    --accent: 270 80% 65%;
-    --accent-foreground: 240 10% 98%;
+    --accent: 0 100% 60%;
+    --accent-foreground: 0 0% 98%;
 
     --destructive: 0 84% 60%;
-    --destructive-foreground: 240 10% 98%;
+    --destructive-foreground: 0 0% 98%;
 
-    --border: 240 10% 20%;
-    --input: 240 10% 18%;
-    --ring: 270 80% 65%;
+    --border: 0 0% 20%;
+    --input: 0 0% 18%;
+    --ring: 0 100% 50%;
 
     --radius: 1rem;
 
-    /* Gradient colors */
-    --gradient-purple: 270 80% 65%;
-    --gradient-blue: 220 90% 60%;
-    --gradient-start: 270 80% 40%;
-    --gradient-end: 220 90% 50%;
+    /* YouTube-style gradient colors */
+    --gradient-red: 0 100% 50%;
+    --gradient-dark-red: 0 85% 45%;
+    --gradient-orange: 15 100% 55%;
+    --gradient-start: 0 85% 40%;
+    --gradient-end: 15 100% 50%;
 
     /* Glass effect */
-    --glass-bg: 240 10% 15% / 0.4;
-    --glass-border: 240 10% 30% / 0.2;
+    --glass-bg: 0 0% 15% / 0.4;
+    --glass-border: 0 0% 30% / 0.2;
 
     /* Glow colors */
-    --glow-purple: 270 100% 70%;
-    --glow-blue: 220 100% 65%;
+    --glow-red: 0 100% 60%;
+    --glow-orange: 15 100% 60%;
   }
 }
 
@@ -61,7 +62,7 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    background: linear-gradient(135deg, hsl(var(--background)) 0%, hsl(240 10% 6%) 100%);
+    background: linear-gradient(135deg, hsl(var(--background)) 0%, hsl(0 0% 6%) 100%);
   }
 
   html {
@@ -77,7 +78,7 @@ All colors MUST be HSL.
   }
 
   .gradient-text {
-    background: linear-gradient(135deg, hsl(var(--gradient-purple)), hsl(var(--gradient-blue)));
+    background: linear-gradient(135deg, hsl(var(--gradient-red)), hsl(var(--gradient-orange)));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -96,19 +97,19 @@ All colors MUST be HSL.
     inset: 0;
     border-radius: inherit;
     padding: 1px;
-    background: linear-gradient(135deg, hsl(var(--gradient-purple)), hsl(var(--gradient-blue)));
+    background: linear-gradient(135deg, hsl(var(--gradient-red)), hsl(var(--gradient-orange)));
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     -webkit-mask-composite: xor;
     mask-composite: exclude;
     pointer-events: none;
   }
 
-  .glow-purple {
-    box-shadow: 0 0 40px hsl(var(--glow-purple) / 0.3);
+  .glow-red {
+    box-shadow: 0 0 40px hsl(var(--glow-red) / 0.3);
   }
 
-  .glow-blue {
-    box-shadow: 0 0 40px hsl(var(--glow-blue) / 0.3);
+  .glow-orange {
+    box-shadow: 0 0 40px hsl(var(--glow-orange) / 0.3);
   }
 
   .animate-float {
@@ -130,10 +131,10 @@ All colors MUST be HSL.
 
   @keyframes pulse-glow {
     0%, 100% {
-      box-shadow: 0 0 20px hsl(var(--glow-purple) / 0.3);
+      box-shadow: 0 0 20px hsl(var(--glow-red) / 0.3);
     }
     50% {
-      box-shadow: 0 0 60px hsl(var(--glow-purple) / 0.6);
+      box-shadow: 0 0 60px hsl(var(--glow-red) / 0.6);
     }
   }
 

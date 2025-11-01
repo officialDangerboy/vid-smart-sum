@@ -21,7 +21,7 @@ const Hero = () => {
           </p>
           
           <div className="flex flex-wrap gap-4 justify-center animate-fade-up" style={{ animationDelay: '0.4s' }}>
-            <Button size="lg" className="bg-gradient-to-r from-primary to-secondary hover:opacity-90 transition-opacity text-lg px-8 py-6 glow-purple">
+            <Button size="lg" className="bg-gradient-to-r from-primary to-accent hover:opacity-90 transition-opacity text-lg px-8 py-6 glow-red">
               <Download className="w-5 h-5 mr-2" />
               Get the Extension
             </Button>
@@ -33,7 +33,7 @@ const Hero = () => {
 
           {/* Hero mockup image */}
           <div className="mt-16 animate-fade-up" style={{ animationDelay: '0.6s' }}>
-            <div className="relative rounded-2xl overflow-hidden glass gradient-border glow-purple">
+            <div className="relative rounded-2xl overflow-hidden glass gradient-border glow-red">
               <img 
                 src={heroMockup} 
                 alt="YouTube AI Summarizer Interface showing video player with AI-powered summary sidebar" 
