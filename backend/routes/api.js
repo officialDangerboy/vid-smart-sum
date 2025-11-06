@@ -48,11 +48,6 @@ router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
       };
     }
     
-    // Generate referral code if doesn't exist
-    if (!user.referral.code) {
-      await user.generateReferralCode();
-    }
-    
     res.json({
       success: true,
       user: {

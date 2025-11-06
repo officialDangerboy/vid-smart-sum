@@ -1,5 +1,6 @@
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const User = require('../models/User');
+const crypto = require('crypto');
 
 // ============================================
 // TIERED REFERRAL CREDIT CALCULATOR
@@ -54,7 +55,7 @@ async function processReferral(newUser, referralCode) {
   // STEP 1: Update new user with referrer info
   try {
     newUser.referral = newUser.referral || {
-      code: null,
+      code: newUser.referral?.code || null,
       referred_by: null,
       referred_users: [],
       total_referrals: 0,
@@ -150,7 +151,7 @@ async function processReferral(newUser, referralCode) {
 }
 
 // ============================================
-// PASSPORT GOOGLE STRATEGY - FIXED
+// PASSPORT GOOGLE STRATEGY - COMPLETELY FIXED
 // ============================================
 
 module.exports = function(passport) {
@@ -173,7 +174,9 @@ module.exports = function(passport) {
         
         let user = await User.findOne({ googleId: profile.id });
 
+        // ============================================
         // EXISTING USER - Just login
+        // ============================================
         if (user) {
           console.log('✅ Existing user logged in:', email);
           
@@ -188,16 +191,34 @@ module.exports = function(passport) {
           user.security = user.security || {};
           user.security.last_ip_address = ipAddress;
           
+          // ✅ FIXED: Ensure existing users have referral codes
+          if (!user.referral || !user.referral.code) {
+            const newCode = `REF${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
+            console.log('🔗 Generating referral code for existing user:', newCode);
+            
+            user.referral = user.referral || {};
+            user.referral.code = newCode;
+            user.referral.referred_users = user.referral.referred_users || [];
+            user.referral.total_referrals = user.referral.total_referrals || 0;
+            user.referral.total_credits_earned = user.referral.total_credits_earned || 0;
+          }
+          
           await user.save();
           return done(null, user);
         }
 
+        // ============================================
         // NEW USER - Create account
+        // ============================================
         console.log('🆕 Creating new user:', email);
         
         const ipAddress = req.ip || req.connection.remoteAddress;
         
-        // Initialize referral object properly
+        // ✅ FIXED: Generate referral code IMMEDIATELY before creating user
+        const newUserReferralCode = `REF${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
+        console.log('🎫 Generated NEW USER referral code:', newUserReferralCode);
+        
+        // Create user with referral code already initialized
         user = new User({
           googleId: profile.id,
           email: email,
@@ -210,40 +231,54 @@ module.exports = function(passport) {
               timestamp: new Date()
             }]
           },
+          // ✅ CRITICAL FIX: Set referral code BEFORE saving
           referral: {
-            code: null,
-            referred_by: null,
+            code: newUserReferralCode,  // Generate immediately
+            referred_by: null,           // Will be set if they used a referral
             referred_users: [],
             total_referrals: 0,
             total_credits_earned: 0
           }
         });
 
-        // SAVE USER FIRST - This ensures _id is generated
+        // ✅ STEP 1: SAVE USER FIRST - This ensures _id and referral.code are persisted
         await user.save();
         console.log('✅ New user created with ID:', user._id);
+        console.log('✅ New user referral code:', user.referral.code);
 
-        // HANDLE REFERRAL AFTER USER IS SAVED
-        const referralCode = req.session?.referralCode;
+        // ============================================
+        // HANDLE INCOMING REFERRAL (if new user was referred)
+        // ============================================
+        const incomingReferralCode = req.session?.referralCode;
         
-        console.log('🔗 Checking for referral code:', referralCode);
+        console.log('🔗 Checking for incoming referral code:', incomingReferralCode);
         
-        if (referralCode) {
+        if (incomingReferralCode) {
           try {
             console.log('🎁 Processing referral for new user...');
             
             // Small delay to ensure DB write is complete
             await new Promise(resolve => setTimeout(resolve, 100));
             
-            const result = await processReferral(user, referralCode);
+            // ✅ FIXED: Fetch fresh user to avoid stale data
+            const freshUser = await User.findById(user._id);
             
-            if (result && result.success) {
-              console.log('✅✅✅ Referral processed successfully! ✅✅✅');
-              console.log('📊 Referral details:', result);
+            if (!freshUser) {
+              console.error('❌ Could not fetch fresh user data');
             } else {
-              console.log('⚠️ Referral processing failed:', result?.message);
-              if (result?.error) {
-                console.log('❌ Error details:', result.error);
+              const result = await processReferral(freshUser, incomingReferralCode);
+              
+              if (result && result.success) {
+                console.log('✅✅✅ Referral processed successfully! ✅✅✅');
+                console.log('📊 Referral details:', result);
+                
+                // Update local user instance with latest data
+                user = await User.findById(user._id);
+              } else {
+                console.log('⚠️ Referral processing failed:', result?.message);
+                if (result?.error) {
+                  console.log('❌ Error details:', result.error);
+                }
               }
             }
           } catch (referralError) {
@@ -252,7 +287,7 @@ module.exports = function(passport) {
             console.error('Stack trace:', referralError.stack);
           }
         } else {
-          console.log('ℹ️ No referral code found for new user');
+          console.log('ℹ️ No incoming referral code for new user');
         }
 
         // Clear referral code from session
@@ -260,9 +295,11 @@ module.exports = function(passport) {
           delete req.session.referralCode;
         }
 
-        // Fetch updated user data to reflect any referral changes
-        const updatedUser = await User.findById(user._id);
-        done(null, updatedUser || user);
+        // ✅ FINAL STEP: Return the latest user data
+        const finalUser = await User.findById(user._id);
+        console.log('🎯 Final user referral code:', finalUser.referral?.code);
+        
+        done(null, finalUser || user);
         
       } catch (error) {
         console.error('❌ OAuth Strategy Error:', error);

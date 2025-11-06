@@ -661,12 +661,77 @@ userSchema.methods.cancelSubscription = async function() {
 
 // Generate referral code - FIXED: Prevent parallel save errors
 userSchema.methods.generateReferralCode = async function() {
-  if (!this.referral.code) {
-    const code = `REF${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-    this.referral.code = code;
-    // Don't save here - let the caller handle saving
+  // ✅ If code already exists, return it immediately (prevents regeneration)
+  if (this.referral && this.referral.code) {
+    console.log('📌 Referral code already exists:', this.referral.code);
+    return this.referral.code;
   }
-  return this.referral.code;
+
+  console.log('🔄 Generating new referral code for user:', this._id);
+
+  // Generate a unique code
+  const newCode = `REF${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
+
+  // ✅ CRITICAL: Use atomic findOneAndUpdate to prevent race conditions
+  try {
+    const updated = await mongoose.model('User').findOneAndUpdate(
+      {
+        _id: this._id,
+        $or: [
+          { 'referral.code': { $exists: false } },
+          { 'referral.code': null },
+          { 'referral.code': '' }
+        ]
+      },
+      {
+        $set: { 
+          'referral.code': newCode,
+          'referral.total_referrals': 0,
+          'referral.total_credits_earned': 0,
+          'referral.referred_users': []
+        }
+      },
+      {
+        new: true,  // Return updated document
+        runValidators: true
+      }
+    );
+
+    if (updated && updated.referral && updated.referral.code) {
+      // Success - update local instance
+      this.referral = this.referral || {};
+      this.referral.code = updated.referral.code;
+      console.log('✅ Referral code generated and saved:', updated.referral.code);
+      return updated.referral.code;
+    }
+
+    // Code was already set by another process - fetch and return it
+    console.log('⚠️ Code already set by another process, fetching...');
+    const freshUser = await mongoose.model('User').findById(this._id);
+    
+    if (freshUser && freshUser.referral && freshUser.referral.code) {
+      this.referral = this.referral || {};
+      this.referral.code = freshUser.referral.code;
+      console.log('✅ Using existing code from DB:', freshUser.referral.code);
+      return freshUser.referral.code;
+    }
+
+    // Fallback - should never reach here
+    console.error('❌ Failed to generate or fetch referral code');
+    return null;
+
+  } catch (error) {
+    console.error('❌ Error in generateReferralCode:', error);
+    
+    // On error, try to fetch existing code
+    const freshUser = await mongoose.model('User').findById(this._id);
+    if (freshUser && freshUser.referral && freshUser.referral.code) {
+      this.referral.code = freshUser.referral.code;
+      return freshUser.referral.code;
+    }
+    
+    throw error;
+  }
 };
 
 // ============================================
@@ -688,6 +753,10 @@ userSchema.index({ 'subscription.plan': 1 });
 userSchema.index({ 'subscription.stripe_customer_id': 1 });
 userSchema.index({ 'referral.code': 1 });
 userSchema.index({ 'timestamps.created_at': -1 });
+userSchema.index({ 'referral.code': 1 }, { 
+  unique: true, 
+  sparse: true 
+});
 
 // ============================================
 // MODEL EXPORT
