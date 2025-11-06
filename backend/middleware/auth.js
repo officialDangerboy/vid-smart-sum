@@ -93,6 +93,60 @@ const optionalAuth = async (req, res, next) => {
 };
 
 /**
+ * IP Tracking Middleware
+ * Tracks user's IP addresses for security purposes
+ */
+const trackIP = async (req, res, next) => {
+  try {
+    if (req.user) {
+      // Extract IP from headers (handles proxies, load balancers, etc.)
+      const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
+                 req.headers['x-real-ip'] || 
+                 req.connection?.remoteAddress || 
+                 req.socket?.remoteAddress ||
+                 req.ip;
+
+      if (ip) {
+        // Initialize security object if it doesn't exist
+        if (!req.user.security) {
+          req.user.security = {
+            ip_addresses: [],
+            last_ip: null,
+            failed_login_attempts: 0,
+            last_failed_login: null,
+            account_locked_until: null
+          };
+        }
+
+        // Initialize ip_addresses array if it doesn't exist
+        if (!req.user.security.ip_addresses) {
+          req.user.security.ip_addresses = [];
+        }
+
+        // Add new IP if not already tracked
+        if (!req.user.security.ip_addresses.includes(ip)) {
+          req.user.security.ip_addresses.push(ip);
+          console.log(`🔒 New IP tracked for user ${req.user.email}: ${ip}`);
+        }
+
+        // Update last IP
+        req.user.security.last_ip = ip;
+
+        // Save user (don't await to avoid blocking the request)
+        req.user.save().catch(err => {
+          console.error('Error saving IP tracking:', err);
+        });
+      }
+    }
+    next();
+  } catch (error) {
+    console.error('IP tracking error:', error);
+    // Continue even if tracking fails - don't block the request
+    next();
+  }
+};
+
+/**
  * Role-based authorization middleware
  */
 const requireRole = (allowedRoles) => {
@@ -146,6 +200,7 @@ const requirePlan = (requiredPlans) => {
 module.exports = {
   authenticateJWT,
   optionalAuth,
+  trackIP,
   requireRole,
   requirePlan
 };
