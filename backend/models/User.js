@@ -102,7 +102,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
-    index: true
+    
   },
   email: {
     type: String,
@@ -110,7 +110,7 @@ const userSchema = new mongoose.Schema({
     unique: true,
     lowercase: true,
     trim: true,
-    index: true
+    
   },
   name: {
     type: String,
@@ -162,13 +162,13 @@ const userSchema = new mongoose.Schema({
       type: String,
       enum: ['free', 'pro'],
       default: 'free',
-      index: true
+      
     },
     status: {
       type: String,
       enum: ['active', 'inactive', 'cancelled', 'expired', 'past_due'],
       default: 'active',
-      index: true
+      
     },
     billing_cycle: {
       type: String,
@@ -188,11 +188,11 @@ const userSchema = new mongoose.Schema({
     cancelled_at: Date,
     stripe_customer_id: {
       type: String,
-      index: true
+      
     },
     stripe_subscription_id: {
       type: String,
-      index: true
+      
     }
   },
 
@@ -318,12 +318,12 @@ const userSchema = new mongoose.Schema({
     is_active: {
       type: Boolean,
       default: true,
-      index: true
+      
     },
     is_banned: {
       type: Boolean,
       default: false,
-      index: true
+      
     },
     is_verified: {
       type: Boolean,
@@ -371,7 +371,6 @@ userSchema.index({ googleId: 1 });
 userSchema.index({ 'subscription.plan': 1, 'subscription.status': 1 });
 userSchema.index({ 'flags.is_active': 1 });
 userSchema.index({ 'credits.next_reset_at': 1 });
-
 // ============================================
 // VIRTUAL FIELDS
 // ============================================

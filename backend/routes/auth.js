@@ -5,13 +5,15 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const User = require('../models/User');
 
+// Import middleware from the NEW authMiddleware file
+const { authenticateJWT } = require('../middleware/authMiddleware');
+
 // ============================================
 // CONFIGURATION & CONSTANTS
 // ============================================
 
-// Store CSRF tokens temporarily (use Redis in production)
 const csrfTokens = new Map();
-const CSRF_TOKEN_EXPIRY = 10 * 60 * 1000; // 10 minutes
+const CSRF_TOKEN_EXPIRY = 10 * 60 * 1000;
 const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY = '7d';
 const REFRESH_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
@@ -21,15 +23,12 @@ const MAX_REFRESH_TOKENS = 5;
 // HELPER FUNCTIONS
 // ============================================
 
-/**
- * Generate JWT access and refresh tokens for a user
- */
 function generateTokens(user) {
   const accessToken = jwt.sign(
     {
       id: user._id,
       email: user.email,
-      plan: user.subscription.plan
+      plan: user.subscription?.plan || 'free'
     },
     process.env.JWT_SECRET,
     { expiresIn: ACCESS_TOKEN_EXPIRY }
@@ -47,12 +46,8 @@ function generateTokens(user) {
   return { accessToken, refreshToken };
 }
 
-/**
- * Get cookie configuration based on environment
- */
 function getCookieOptions(maxAge) {
   const isProduction = process.env.NODE_ENV === 'production';
-
   return {
     httpOnly: true,
     secure: isProduction,
@@ -63,9 +58,6 @@ function getCookieOptions(maxAge) {
   };
 }
 
-/**
- * Clean up expired CSRF tokens from memory
- */
 function cleanupExpiredTokens() {
   for (const [token, data] of csrfTokens.entries()) {
     if (Date.now() - data.timestamp > CSRF_TOKEN_EXPIRY) {
@@ -74,9 +66,6 @@ function cleanupExpiredTokens() {
   }
 }
 
-/**
- * Store refresh token in user's security object
- */
 async function storeRefreshToken(user, refreshToken) {
   user.security = user.security || {};
   user.security.refresh_tokens = user.security.refresh_tokens || [];
@@ -87,7 +76,6 @@ async function storeRefreshToken(user, refreshToken) {
     expires_at: new Date(Date.now() + REFRESH_TOKEN_EXPIRY_MS)
   });
 
-  // Keep only the most recent tokens
   if (user.security.refresh_tokens.length > MAX_REFRESH_TOKENS) {
     user.security.refresh_tokens = user.security.refresh_tokens.slice(-MAX_REFRESH_TOKENS);
   }
@@ -95,11 +83,8 @@ async function storeRefreshToken(user, refreshToken) {
   await user.save();
 }
 
-/**
- * Verify and validate refresh token
- */
 function isValidRefreshToken(user, refreshToken) {
-  return user.security.refresh_tokens?.some(
+  return user.security?.refresh_tokens?.some(
     t => t.token === refreshToken && new Date(t.expires_at) > new Date()
   );
 }
@@ -108,40 +93,27 @@ function isValidRefreshToken(user, refreshToken) {
 // GOOGLE OAUTH ROUTES
 // ============================================
 
-/**
- * Initiate Google OAuth flow
- * Handles referral codes and CSRF protection
- */
 router.get('/google', (req, res, next) => {
-  // Generate CSRF token for security
   const csrfToken = crypto.randomBytes(32).toString('hex');
   const referralCode = req.query.ref;
   
-  // Store referral code in session if provided
   if (referralCode) {
     req.session.referralCode = referralCode;
   }
 
-  // Store CSRF token with metadata
   csrfTokens.set(csrfToken, {
     timestamp: Date.now(),
     referralCode: referralCode || null
   });
 
-  // Clean up old tokens
   cleanupExpiredTokens();
 
-  // Redirect to Google OAuth
   passport.authenticate('google', {
     scope: ['profile', 'email'],
     state: csrfToken
   })(req, res, next);
 });
 
-/**
- * Google OAuth callback handler
- * Validates CSRF, generates tokens, sets cookies
- */
 router.get('/google/callback',
   passport.authenticate('google', { 
     failureRedirect: `${process.env.FRONTEND_URL}/auth/callback?error=access_denied`,
@@ -151,24 +123,15 @@ router.get('/google/callback',
     try {
       const state = req.query.state;
       
-      // Verify CSRF token
       if (!state || !csrfTokens.has(state)) {
         return res.redirect(`${process.env.FRONTEND_URL}/auth/callback?error=csrf_failed`);
       }
       
-      // Remove used CSRF token
       csrfTokens.delete(state);
 
-      // Generate JWT tokens
       const { accessToken, refreshToken } = generateTokens(req.user);
-
-      // Store refresh token securely
       await storeRefreshToken(req.user, refreshToken);
-
-      // DON'T set cookies - send tokens in URL instead
-      // (cookies don't work cross-domain on Vercel)
       
-      // Redirect with tokens in URL
       const redirectUrl = new URL(`${process.env.FRONTEND_URL}/auth/callback`);
       redirectUrl.searchParams.set('success', 'true');
       redirectUrl.searchParams.set('accessToken', accessToken);
@@ -187,12 +150,10 @@ router.get('/google/callback',
 // TOKEN MANAGEMENT ROUTES
 // ============================================
 
-/**
- * Refresh expired access token using refresh token
- */
 router.post('/refresh-token', async (req, res) => {
   try {
-    const { refreshToken } = req.cookies;
+    // Check both cookies and request body
+    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
 
     if (!refreshToken) {
       return res.status(401).json({ 
@@ -201,7 +162,6 @@ router.post('/refresh-token', async (req, res) => {
       });
     }
 
-    // Verify refresh token
     const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
 
     if (decoded.type !== 'refresh') {
@@ -211,17 +171,15 @@ router.post('/refresh-token', async (req, res) => {
       });
     }
 
-    // Find user
     const user = await User.findById(decoded.id);
 
-    if (!user) {
+    if (!user || !user.flags?.is_active) {
       return res.status(401).json({ 
-        error: 'User not found',
+        error: 'User not found or inactive',
         code: 'USER_NOT_FOUND'
       });
     }
 
-    // Validate token exists in database
     if (!isValidRefreshToken(user, refreshToken)) {
       return res.status(401).json({ 
         error: 'Invalid or expired refresh token',
@@ -229,22 +187,23 @@ router.post('/refresh-token', async (req, res) => {
       });
     }
 
-    // Generate new tokens
     const tokens = generateTokens(user);
 
-    // Remove old refresh token and store new one
     user.security.refresh_tokens = user.security.refresh_tokens.filter(
       t => t.token !== refreshToken
     );
     await storeRefreshToken(user, tokens.refreshToken);
 
-    // Set new cookies
+    // Set cookies for backward compatibility
     res.cookie('accessToken', tokens.accessToken, getCookieOptions(15 * 60 * 1000));
     res.cookie('refreshToken', tokens.refreshToken, getCookieOptions(REFRESH_TOKEN_EXPIRY_MS));
 
+    // Also return tokens in response body for localStorage
     res.json({
       success: true,
-      message: 'Token refreshed successfully'
+      message: 'Token refreshed successfully',
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken
     });
 
   } catch (error) {
@@ -264,35 +223,14 @@ router.post('/refresh-token', async (req, res) => {
   }
 });
 
-/**
- * Revoke all refresh tokens for a user (logout from all devices)
- */
-router.post('/revoke-all-sessions', async (req, res) => {
+router.post('/revoke-all-sessions', authenticateJWT, async (req, res) => {
   try {
-    const { accessToken } = req.cookies;
+    const user = req.user;
 
-    if (!accessToken) {
-      return res.status(401).json({ 
-        error: 'Not authenticated',
-        code: 'NO_TOKEN'
-      });
-    }
-
-    const decoded = jwt.verify(accessToken, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id);
-
-    if (!user) {
-      return res.status(401).json({ 
-        error: 'User not found',
-        code: 'USER_NOT_FOUND'
-      });
-    }
-
-    // Clear all refresh tokens
+    user.security = user.security || {};
     user.security.refresh_tokens = [];
     await user.save();
 
-    // Clear cookies
     const cookieOptions = {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -321,16 +259,12 @@ router.post('/revoke-all-sessions', async (req, res) => {
 // SESSION MANAGEMENT ROUTES
 // ============================================
 
-/**
- * Get current authenticated user information
- */
 router.get('/user', async (req, res) => {
   try {
-    // Try header first (for localStorage tokens), then cookies (for local dev)
     let accessToken = req.headers.authorization?.replace('Bearer ', '');
     
     if (!accessToken) {
-      accessToken = req.cookies.accessToken;
+      accessToken = req.cookies?.accessToken;
     }
 
     if (!accessToken) {
@@ -343,9 +277,9 @@ router.get('/user', async (req, res) => {
     const decoded = jwt.verify(accessToken, process.env.JWT_SECRET);
     const user = await User.findById(decoded.id);
 
-    if (!user) {
+    if (!user || !user.flags?.is_active) {
       return res.status(401).json({
-        error: 'User not found',
+        error: 'User not found or inactive',
         code: 'INVALID_USER'
       });
     }
@@ -387,32 +321,18 @@ router.get('/user', async (req, res) => {
   }
 });
 
-/**
- * Logout user and revoke current refresh token
- */
-router.post('/logout', async (req, res) => {
+router.post('/logout', authenticateJWT, async (req, res) => {
   try {
-    const { refreshToken } = req.cookies;
+    const user = req.user;
+    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
 
-    // Revoke refresh token if present
-    if (refreshToken) {
-      try {
-        const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
-        const user = await User.findById(decoded.id);
-
-        if (user) {
-          user.security.refresh_tokens = user.security.refresh_tokens?.filter(
-            t => t.token !== refreshToken
-          ) || [];
-          await user.save();
-        }
-      } catch (err) {
-        // Token invalid or expired, continue with logout
-        console.log('Invalid token during logout:', err.message);
-      }
+    if (refreshToken && user.security?.refresh_tokens) {
+      user.security.refresh_tokens = user.security.refresh_tokens.filter(
+        t => t.token !== refreshToken
+      );
+      await user.save();
     }
 
-    // Clear cookies
     const cookieOptions = {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -431,7 +351,6 @@ router.post('/logout', async (req, res) => {
   } catch (error) {
     console.error('Logout error:', error);
     
-    // Always clear cookies even if there's an error
     res.clearCookie('accessToken');
     res.clearCookie('refreshToken');
     
