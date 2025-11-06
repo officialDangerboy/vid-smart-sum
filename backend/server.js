@@ -5,6 +5,7 @@ const passport = require('passport');
 const cors = require('cors');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 
@@ -60,11 +61,12 @@ app.use(cors({
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true, // This is CRITICAL for cookies!
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  exposedHeaders: ['set-cookie'] // Expose set-cookie header
+  exposedHeaders: ['set-cookie']
 }));
+
 // ============================================
 // BODY PARSERS
 // ============================================
@@ -84,7 +86,7 @@ app.use(session({
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    maxAge: 10 * 60 * 1000, // 10 minutes (only for OAuth flow)
+    maxAge: 10 * 60 * 1000,
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
   }
 }));
@@ -103,24 +105,28 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 // ============================================
+// RATE LIMITING
+// ============================================
+const apiLimiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+  message: {
+    error: 'Too many requests',
+    code: 'RATE_LIMIT_EXCEEDED'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// ============================================
 // ROUTES
 // ============================================
-const { securityHeaders, rateLimit } = require('./middleware/auth');
-
-// Apply security headers globally
-app.use(securityHeaders);
 
 // Auth routes (no rate limiting on OAuth callbacks)
 app.use('/auth', require('./routes/auth'));
 
 // API routes (with rate limiting)
-app.use('/api',
-  rateLimit({
-    maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
-    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000
-  }),
-  require('./routes/api')
-);
+app.use('/api', apiLimiter, require('./routes/api'));
 
 // ============================================
 // HEALTH CHECK
