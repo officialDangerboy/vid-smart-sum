@@ -16,6 +16,8 @@ const Login = () => {
   const API_URL = import.meta.env.VITE_API_URL || "https://vid-smart-sum.vercel.app";
 
   useEffect(() => {
+    let pollInterval = null;
+
     const handleMessage = async (event) => {
       console.log('\n📨 ========================================');
       console.log('   MESSAGE RECEIVED IN PARENT');
@@ -23,47 +25,24 @@ const Login = () => {
       console.log('Origin:', event.origin);
       console.log('Window origin:', window.location.origin);
       console.log('Data:', JSON.stringify(event.data, null, 2));
-      console.log('Current cookies:', document.cookie);
       console.log('   ========================================\n');
 
       if (event.origin !== window.location.origin) {
-        console.warn('⚠️ Ignored message from unknown origin');
+        console.warn('⚠️ Ignored message from unknown origin:', event.origin);
         return;
       }
 
-      const { type, success, error, cookies } = event.data;
+      const { type, success, error } = event.data;
 
       if (type === 'OAUTH_RESPONSE') {
+        console.log('✅ OAuth response received');
         setIsGoogleLoading(false);
 
         if (success) {
-          console.log('✅ SUCCESS MESSAGE RECEIVED');
-          console.log('Cookies in message:', cookies);
-          console.log('Current document.cookie:', document.cookie);
-
-          toast({
-            title: "Login successful!",
-            description: "Loading your dashboard...",
-          });
-
-          // Increased delay to 1500ms
-          setTimeout(async () => {
-            console.log('🔄 Refreshing auth after 1500ms delay...');
-            console.log('Cookies before refresh:', document.cookie);
-
-            try {
-              await refreshAuth();
-              console.log('✅ Auth refreshed, navigating to dashboard');
-              navigate('/dashboard', { replace: true });
-            } catch (err) {
-              console.error('❌ Error refreshing auth:', err);
-              console.log('🔄 Forcing full page reload as fallback');
-              window.location.href = '/dashboard';
-            }
-          }, 1500); // Increased from 500ms
-
+          console.log('✅ OAuth Success via postMessage');
+          handleSuccessfulAuth();
         } else {
-          console.error('❌ ERROR MESSAGE RECEIVED:', error);
+          console.error('❌ OAuth Error via postMessage:', error);
           toast({
             title: "Login failed",
             description: error || "Authentication failed.",
@@ -73,44 +52,23 @@ const Login = () => {
       }
     };
 
-    const handleStorageChange = async (event) => {
+    const handleStorageChange = (event) => {
       console.log('\n📦 ========================================');
-      console.log('   LOCALSTORAGE EVENT');
+      console.log('   STORAGE EVENT DETECTED');
       console.log('   ========================================');
       console.log('Key:', event.key);
-      console.log('New Value:', event.newValue);
       console.log('   ========================================\n');
 
       if (event.key === 'oauth_success') {
-        console.log('✅ OAuth success via localStorage');
-        const data = JSON.parse(event.newValue || '{}');
-        console.log('Cookies in localStorage:', data.cookies);
-        console.log('Current document.cookie:', document.cookie);
-
+        console.log('✅ OAuth success detected via storage event');
         setIsGoogleLoading(false);
         localStorage.removeItem('oauth_success');
-
-        toast({
-          title: "Login successful!",
-          description: "Loading your dashboard...",
-        });
-
-        setTimeout(async () => {
-          try {
-            await refreshAuth();
-            navigate('/dashboard', { replace: true });
-          } catch (err) {
-            window.location.href = '/dashboard';
-          }
-        }, 1500);
-
+        handleSuccessfulAuth();
       } else if (event.key === 'oauth_error') {
-        console.log('❌ OAuth error via localStorage');
+        console.log('❌ OAuth error detected via storage event');
         setIsGoogleLoading(false);
-
         const errorData = JSON.parse(event.newValue || '{}');
         localStorage.removeItem('oauth_error');
-
         toast({
           title: "Login failed",
           description: errorData.error || "Authentication failed.",
@@ -119,41 +77,85 @@ const Login = () => {
       }
     };
 
-    // Polling fallback for localStorage (in case storage event doesn't fire)
-    const checkLocalStorage = () => {
-      const success = localStorage.getItem('oauth_success');
-      const error = localStorage.getItem('oauth_error');
+    // Polling fallback - Check localStorage every 500ms
+    const startPolling = () => {
+      console.log('🔄 Starting localStorage polling...');
+      pollInterval = setInterval(() => {
+        const success = localStorage.getItem('oauth_success');
+        const error = localStorage.getItem('oauth_error');
+        const accessToken = localStorage.getItem('accessToken');
 
-      if (success) {
-        console.log('📦 OAuth success detected via polling');
-        handleStorageChange({ key: 'oauth_success', newValue: success });
-      } else if (error) {
-        console.log('📦 OAuth error detected via polling');
-        handleStorageChange({ key: 'oauth_error', newValue: error });
+        if (success || accessToken) {
+          console.log('📦 OAuth success detected via polling');
+          clearInterval(pollInterval);
+          setIsGoogleLoading(false);
+          localStorage.removeItem('oauth_success');
+          handleSuccessfulAuth();
+        } else if (error) {
+          console.log('📦 OAuth error detected via polling');
+          clearInterval(pollInterval);
+          setIsGoogleLoading(false);
+          const errorData = JSON.parse(error);
+          localStorage.removeItem('oauth_error');
+          toast({
+            title: "Login failed",
+            description: errorData.error || "Authentication failed.",
+            variant: "destructive",
+          });
+        }
+      }, 500);
+    };
+
+    const handleSuccessfulAuth = async () => {
+      console.log('🎉 Handling successful authentication...');
+      
+      toast({
+        title: "Login successful!",
+        description: "Loading your dashboard...",
+      });
+
+      // Wait a bit for tokens to be available
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      try {
+        console.log('🔄 Refreshing auth state...');
+        await refreshAuth();
+        console.log('✅ Auth refreshed, navigating to dashboard');
+        navigate('/dashboard', { replace: true });
+      } catch (err) {
+        console.error('❌ Error refreshing auth:', err);
+        console.log('🔄 Forcing navigation as fallback');
+        // Force navigation even if refresh fails
+        window.location.href = '/dashboard';
       }
     };
 
-    const pollingInterval = setInterval(checkLocalStorage, 500);
-
-    console.log('👂 Setting up OAuth listeners (postMessage + localStorage)');
+    console.log('👂 Setting up OAuth listeners');
     window.addEventListener('message', handleMessage);
     window.addEventListener('storage', handleStorageChange);
 
     return () => {
-      console.log('🔇 Removing OAuth listeners');
-      clearInterval(pollingInterval);
+      console.log('🔇 Cleaning up OAuth listeners');
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
       window.removeEventListener('message', handleMessage);
       window.removeEventListener('storage', handleStorageChange);
     };
   }, [toast, refreshAuth, navigate]);
 
   const handleGoogleLogin = () => {
-    console.log('🔓 Initiating Google OAuth...');
+    console.log('\n🔓 ========================================');
+    console.log('   INITIATING GOOGLE OAUTH');
+    console.log('   ========================================\n');
+    
     setIsGoogleLoading(true);
 
     // Clear any previous auth data
     localStorage.removeItem('oauth_success');
     localStorage.removeItem('oauth_error');
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
 
     const urlParams = new URLSearchParams(window.location.search);
     const referralCode = urlParams.get('ref');
@@ -163,21 +165,20 @@ const Login = () => {
     }
 
     const width = 500;
-    const height = 650;
+    const height = 700;
     const left = window.screen.width / 2 - width / 2;
-    const top = window.screen.height / 2 - height / 2; 
-    
+    const top = window.screen.height / 2 - height / 2;
+
     let oauthUrl = `${API_URL}/auth/google`;
     if (referralCode) {
       oauthUrl += `?ref=${encodeURIComponent(referralCode)}`;
     }
 
-    // IMPORTANT: Name the window so we can detect it later
-    const popupName = 'googleOAuthPopup';
+    console.log('🌐 Opening popup to:', oauthUrl);
 
     const popup = window.open(
       oauthUrl,
-      popupName,  // This name survives redirects!
+      'googleOAuthPopup',
       `width=${width},height=${height},left=${left},top=${top},toolbar=no,menubar=no,location=no,status=no,scrollbars=yes,resizable=yes`
     );
 
@@ -192,24 +193,69 @@ const Login = () => {
       return;
     }
 
-    console.log('✅ Popup opened:', popupName);
+    console.log('✅ Popup opened successfully');
+
+    // Start polling for localStorage changes
+    const pollInterval = setInterval(() => {
+      const success = localStorage.getItem('oauth_success');
+      const error = localStorage.getItem('oauth_error');
+      const accessToken = localStorage.getItem('accessToken');
+
+      if (success || accessToken) {
+        console.log('📦 Success detected via polling');
+        clearInterval(pollInterval);
+        setIsGoogleLoading(false);
+        localStorage.removeItem('oauth_success');
+        
+        toast({
+          title: "Login successful!",
+          description: "Loading your dashboard...",
+        });
+
+        setTimeout(async () => {
+          try {
+            await refreshAuth();
+            navigate('/dashboard', { replace: true });
+          } catch (err) {
+            window.location.href = '/dashboard';
+          }
+        }, 500);
+      } else if (error) {
+        console.log('📦 Error detected via polling');
+        clearInterval(pollInterval);
+        setIsGoogleLoading(false);
+        const errorData = JSON.parse(error);
+        localStorage.removeItem('oauth_error');
+        toast({
+          title: "Login failed",
+          description: errorData.error || "Authentication failed.",
+          variant: "destructive",
+        });
+      }
+    }, 500);
 
     // Monitor popup closure
     const popupTimer = setInterval(() => {
       if (popup.closed) {
         clearInterval(popupTimer);
+        clearInterval(pollInterval);
         console.log('🔒 Popup closed');
 
         setTimeout(() => {
-          setIsGoogleLoading(false);
+          // Check if we got tokens even though popup closed
+          const accessToken = localStorage.getItem('accessToken');
+          if (!accessToken) {
+            setIsGoogleLoading(false);
+          }
         }, 1000);
       }
     }, 500);
 
-    // Safety timeout
+    // Safety timeout (2 minutes)
     setTimeout(() => {
       if (!popup.closed) {
         clearInterval(popupTimer);
+        clearInterval(pollInterval);
         popup.close();
         setIsGoogleLoading(false);
         toast({
