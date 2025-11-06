@@ -19,30 +19,18 @@ const Login = () => {
     let pollInterval = null;
 
     const handleMessage = async (event) => {
-      console.log('\n📨 ========================================');
-      console.log('   MESSAGE RECEIVED IN PARENT');
-      console.log('   ========================================');
-      console.log('Origin:', event.origin);
-      console.log('Window origin:', window.location.origin);
-      console.log('Data:', JSON.stringify(event.data, null, 2));
-      console.log('   ========================================\n');
-
       if (event.origin !== window.location.origin) {
-        console.warn('⚠️ Ignored message from unknown origin:', event.origin);
         return;
       }
 
       const { type, success, error } = event.data;
 
       if (type === 'OAUTH_RESPONSE') {
-        console.log('✅ OAuth response received');
         setIsGoogleLoading(false);
 
         if (success) {
-          console.log('✅ OAuth Success via postMessage');
           handleSuccessfulAuth();
         } else {
-          console.error('❌ OAuth Error via postMessage:', error);
           toast({
             title: "Login failed",
             description: error || "Authentication failed.",
@@ -53,19 +41,11 @@ const Login = () => {
     };
 
     const handleStorageChange = (event) => {
-      console.log('\n📦 ========================================');
-      console.log('   STORAGE EVENT DETECTED');
-      console.log('   ========================================');
-      console.log('Key:', event.key);
-      console.log('   ========================================\n');
-
       if (event.key === 'oauth_success') {
-        console.log('✅ OAuth success detected via storage event');
         setIsGoogleLoading(false);
         localStorage.removeItem('oauth_success');
         handleSuccessfulAuth();
       } else if (event.key === 'oauth_error') {
-        console.log('❌ OAuth error detected via storage event');
         setIsGoogleLoading(false);
         const errorData = JSON.parse(event.newValue || '{}');
         localStorage.removeItem('oauth_error');
@@ -79,20 +59,17 @@ const Login = () => {
 
     // Polling fallback - Check localStorage every 500ms
     const startPolling = () => {
-      console.log('🔄 Starting localStorage polling...');
       pollInterval = setInterval(() => {
         const success = localStorage.getItem('oauth_success');
         const error = localStorage.getItem('oauth_error');
         const accessToken = localStorage.getItem('accessToken');
 
         if (success || accessToken) {
-          console.log('📦 OAuth success detected via polling');
           clearInterval(pollInterval);
           setIsGoogleLoading(false);
           localStorage.removeItem('oauth_success');
           handleSuccessfulAuth();
         } else if (error) {
-          console.log('📦 OAuth error detected via polling');
           clearInterval(pollInterval);
           setIsGoogleLoading(false);
           const errorData = JSON.parse(error);
@@ -107,8 +84,6 @@ const Login = () => {
     };
 
     const handleSuccessfulAuth = async () => {
-      console.log('🎉 Handling successful authentication...');
-      
       toast({
         title: "Login successful!",
         description: "Loading your dashboard...",
@@ -118,24 +93,18 @@ const Login = () => {
       await new Promise(resolve => setTimeout(resolve, 500));
 
       try {
-        console.log('🔄 Refreshing auth state...');
         await refreshAuth();
-        console.log('✅ Auth refreshed, navigating to dashboard');
         navigate('/dashboard', { replace: true });
       } catch (err) {
-        console.error('❌ Error refreshing auth:', err);
-        console.log('🔄 Forcing navigation as fallback');
         // Force navigation even if refresh fails
         window.location.href = '/dashboard';
       }
     };
 
-    console.log('👂 Setting up OAuth listeners');
     window.addEventListener('message', handleMessage);
     window.addEventListener('storage', handleStorageChange);
 
     return () => {
-      console.log('🔇 Cleaning up OAuth listeners');
       if (pollInterval) {
         clearInterval(pollInterval);
       }
@@ -145,10 +114,6 @@ const Login = () => {
   }, [toast, refreshAuth, navigate]);
 
   const handleGoogleLogin = () => {
-    console.log('\n🔓 ========================================');
-    console.log('   INITIATING GOOGLE OAUTH');
-    console.log('   ========================================\n');
-    
     setIsGoogleLoading(true);
 
     // Clear any previous auth data
@@ -160,10 +125,6 @@ const Login = () => {
     const urlParams = new URLSearchParams(window.location.search);
     const referralCode = urlParams.get('ref');
 
-    if (referralCode) {
-      console.log('🎁 Referral code detected:', referralCode);
-    }
-
     const width = 500;
     const height = 700;
     const left = window.screen.width / 2 - width / 2;
@@ -174,8 +135,6 @@ const Login = () => {
       oauthUrl += `?ref=${encodeURIComponent(referralCode)}`;
     }
 
-    console.log('🌐 Opening popup to:', oauthUrl);
-
     const popup = window.open(
       oauthUrl,
       'googleOAuthPopup',
@@ -183,7 +142,6 @@ const Login = () => {
     );
 
     if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-      console.error('❌ Popup was blocked');
       setIsGoogleLoading(false);
       toast({
         title: "Popup blocked",
@@ -193,8 +151,6 @@ const Login = () => {
       return;
     }
 
-    console.log('✅ Popup opened successfully');
-
     // Start polling for localStorage changes
     const pollInterval = setInterval(() => {
       const success = localStorage.getItem('oauth_success');
@@ -202,7 +158,6 @@ const Login = () => {
       const accessToken = localStorage.getItem('accessToken');
 
       if (success || accessToken) {
-        console.log('📦 Success detected via polling');
         clearInterval(pollInterval);
         setIsGoogleLoading(false);
         localStorage.removeItem('oauth_success');
@@ -221,7 +176,6 @@ const Login = () => {
           }
         }, 500);
       } else if (error) {
-        console.log('📦 Error detected via polling');
         clearInterval(pollInterval);
         setIsGoogleLoading(false);
         const errorData = JSON.parse(error);
@@ -239,7 +193,6 @@ const Login = () => {
       if (popup.closed) {
         clearInterval(popupTimer);
         clearInterval(pollInterval);
-        console.log('🔒 Popup closed');
 
         setTimeout(() => {
           // Check if we got tokens even though popup closed
