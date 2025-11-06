@@ -39,6 +39,14 @@ const Dashboard = () => {
     fetchUserData();
   }, []);
 
+  const getAuthHeaders = () => {
+    const accessToken = localStorage.getItem('accessToken');
+    return {
+      'Content-Type': 'application/json',
+      ...(accessToken && { 'Authorization': `Bearer ${accessToken}` })
+    };
+  };
+
   const fetchUserData = async () => {
     try {
       setError(null);
@@ -46,9 +54,7 @@ const Dashboard = () => {
 
       const response = await fetch(`${API_URL}/api/user/profile`, {
         credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        }
+        headers: getAuthHeaders() // ✅ Now includes Bearer token
       });
 
       console.log('📡 Profile response status:', response.status);
@@ -79,6 +85,10 @@ const Dashboard = () => {
             description: "Please log in again.",
             variant: "destructive",
           });
+
+          // Clear tokens before logout
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('refreshToken');
           await logout();
           navigate('/login');
         } else {
@@ -102,16 +112,39 @@ const Dashboard = () => {
   const refreshToken = async () => {
     try {
       console.log('🔄 Refreshing access token...');
+      const refreshToken = localStorage.getItem('refreshToken');
+
+      if (!refreshToken) {
+        console.error('❌ No refresh token available');
+        return false;
+      }
+
       const response = await fetch(`${API_URL}/auth/refresh-token`, {
         method: 'POST',
-        credentials: 'include'
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refreshToken })
       });
 
       if (response.ok) {
+        const data = await response.json();
         console.log('✅ Token refreshed successfully');
+
+        // Update localStorage with new tokens
+        if (data.accessToken) {
+          localStorage.setItem('accessToken', data.accessToken);
+        }
+        if (data.refreshToken) {
+          localStorage.setItem('refreshToken', data.refreshToken);
+        }
+
         return true;
       } else {
         console.error('❌ Token refresh failed');
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
         return false;
       }
     } catch (error) {
@@ -122,6 +155,16 @@ const Dashboard = () => {
 
   const handleLogout = async () => {
     try {
+      await fetch(`${API_URL}/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: getAuthHeaders()
+      });
+
+      // Clear tokens
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+
       await logout();
       toast({
         title: "Logged out successfully",
@@ -130,6 +173,9 @@ const Dashboard = () => {
       navigate('/login');
     } catch (error) {
       console.error('Logout failed:', error);
+      // Clear tokens anyway
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
       toast({
         title: "Logout failed",
         description: "An error occurred. Please try again.",
@@ -142,10 +188,14 @@ const Dashboard = () => {
     try {
       const response = await fetch(`${API_URL}/auth/revoke-all-sessions`, {
         method: 'POST',
-        credentials: 'include'
+        credentials: 'include',
+        headers: getAuthHeaders()
       });
 
       if (response.ok) {
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+
         toast({
           title: "Logged out from all devices",
           description: "All your sessions have been terminated.",
@@ -262,8 +312,8 @@ const Dashboard = () => {
               )}
             </h1>
             <p className="text-muted-foreground">
-              {isPro 
-                ? "You have unlimited access to all premium features! 🚀" 
+              {isPro
+                ? "You have unlimited access to all premium features! 🚀"
                 : "Here's your personalized dashboard with all your stats and insights."}
             </p>
           </div>
@@ -438,8 +488,8 @@ const Dashboard = () => {
                 )}
               </CardTitle>
               <CardDescription>
-                {isPro 
-                  ? "You have unlimited summaries and premium features" 
+                {isPro
+                  ? "You have unlimited summaries and premium features"
                   : "Your monthly credits allocation and usage"}
               </CardDescription>
             </CardHeader>
@@ -833,7 +883,7 @@ const Dashboard = () => {
               Invite Friends & Earn {isPro ? 'More Pro Time' : 'Credits'}
             </CardTitle>
             <CardDescription>
-              {isPro 
+              {isPro
                 ? "Share your referral link and help friends discover Pro features! Each referral extends your Pro membership."
                 : "Share your referral link and get 10 credits for each friend who signs up! Your friends get 5 bonus credits too! 🎁"}
             </CardDescription>

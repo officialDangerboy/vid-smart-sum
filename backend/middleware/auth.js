@@ -1,217 +1,383 @@
+const express = require('express');
+const router = express.Router();
+const passport = require('passport');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const User = require('../models/User');
 
+// Import middleware
+const { authenticateJWT } = require('../middleware/auth');
+
 // ============================================
-// JWT AUTHENTICATION MIDDLEWARE
+// CONFIGURATION & CONSTANTS
 // ============================================
 
-exports.authenticateJWT = async (req, res, next) => {
+const csrfTokens = new Map();
+const CSRF_TOKEN_EXPIRY = 10 * 60 * 1000;
+const ACCESS_TOKEN_EXPIRY = '15m';
+const REFRESH_TOKEN_EXPIRY = '7d';
+const REFRESH_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_REFRESH_TOKENS = 5;
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+function generateTokens(user) {
+  const accessToken = jwt.sign(
+    {
+      id: user._id,
+      email: user.email,
+      plan: user.subscription.plan
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: ACCESS_TOKEN_EXPIRY }
+  );
+
+  const refreshToken = jwt.sign(
+    {
+      id: user._id,
+      type: 'refresh'
+    },
+    process.env.JWT_REFRESH_SECRET,
+    { expiresIn: REFRESH_TOKEN_EXPIRY }
+  );
+
+  return { accessToken, refreshToken };
+}
+
+function getCookieOptions(maxAge) {
+  const isProduction = process.env.NODE_ENV === 'production';
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
+    maxAge: maxAge,
+    path: '/',
+    domain: isProduction ? process.env.COOKIE_DOMAIN : undefined
+  };
+}
+
+function cleanupExpiredTokens() {
+  for (const [token, data] of csrfTokens.entries()) {
+    if (Date.now() - data.timestamp > CSRF_TOKEN_EXPIRY) {
+      csrfTokens.delete(token);
+    }
+  }
+}
+
+async function storeRefreshToken(user, refreshToken) {
+  user.security = user.security || {};
+  user.security.refresh_tokens = user.security.refresh_tokens || [];
+  
+  user.security.refresh_tokens.push({
+    token: refreshToken,
+    created_at: new Date(),
+    expires_at: new Date(Date.now() + REFRESH_TOKEN_EXPIRY_MS)
+  });
+
+  if (user.security.refresh_tokens.length > MAX_REFRESH_TOKENS) {
+    user.security.refresh_tokens = user.security.refresh_tokens.slice(-MAX_REFRESH_TOKENS);
+  }
+
+  await user.save();
+}
+
+function isValidRefreshToken(user, refreshToken) {
+  return user.security.refresh_tokens?.some(
+    t => t.token === refreshToken && new Date(t.expires_at) > new Date()
+  );
+}
+
+// ============================================
+// GOOGLE OAUTH ROUTES
+// ============================================
+
+router.get('/google', (req, res, next) => {
+  const csrfToken = crypto.randomBytes(32).toString('hex');
+  const referralCode = req.query.ref;
+  
+  if (referralCode) {
+    req.session.referralCode = referralCode;
+  }
+
+  csrfTokens.set(csrfToken, {
+    timestamp: Date.now(),
+    referralCode: referralCode || null
+  });
+
+  cleanupExpiredTokens();
+
+  passport.authenticate('google', {
+    scope: ['profile', 'email'],
+    state: csrfToken
+  })(req, res, next);
+});
+
+router.get('/google/callback',
+  passport.authenticate('google', { 
+    failureRedirect: `${process.env.FRONTEND_URL}/auth/callback?error=access_denied`,
+    session: false
+  }),
+  async (req, res) => {
+    try {
+      const state = req.query.state;
+      
+      if (!state || !csrfTokens.has(state)) {
+        return res.redirect(`${process.env.FRONTEND_URL}/auth/callback?error=csrf_failed`);
+      }
+      
+      csrfTokens.delete(state);
+
+      const { accessToken, refreshToken } = generateTokens(req.user);
+      await storeRefreshToken(req.user, refreshToken);
+      
+      const redirectUrl = new URL(`${process.env.FRONTEND_URL}/auth/callback`);
+      redirectUrl.searchParams.set('success', 'true');
+      redirectUrl.searchParams.set('accessToken', accessToken);
+      redirectUrl.searchParams.set('refreshToken', refreshToken);
+      
+      res.redirect(redirectUrl.toString());
+
+    } catch (error) {
+      console.error('OAuth callback error:', error);
+      res.redirect(`${process.env.FRONTEND_URL}/auth/callback?error=server_error`);
+    }
+  }
+);
+
+// ============================================
+// TOKEN MANAGEMENT ROUTES
+// ============================================
+
+/**
+ * ✅ FIXED: Refresh token - supports both cookies and body
+ */
+router.post('/refresh-token', async (req, res) => {
   try {
-    const token = req.cookies?.accessToken || 
-                  req.headers.authorization?.replace('Bearer ', '');
+    // Check both cookies and request body
+    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
 
-    if (!token) {
+    if (!refreshToken) {
       return res.status(401).json({ 
-        error: 'Access token required',
+        error: 'No refresh token provided',
+        code: 'NO_REFRESH_TOKEN'
+      });
+    }
+
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+
+    if (decoded.type !== 'refresh') {
+      return res.status(401).json({ 
+        error: 'Invalid token type',
+        code: 'INVALID_TOKEN_TYPE'
+      });
+    }
+
+    const user = await User.findById(decoded.id);
+
+    if (!user) {
+      return res.status(401).json({ 
+        error: 'User not found',
+        code: 'USER_NOT_FOUND'
+      });
+    }
+
+    if (!isValidRefreshToken(user, refreshToken)) {
+      return res.status(401).json({ 
+        error: 'Invalid or expired refresh token',
+        code: 'INVALID_REFRESH_TOKEN'
+      });
+    }
+
+    const tokens = generateTokens(user);
+
+    user.security.refresh_tokens = user.security.refresh_tokens.filter(
+      t => t.token !== refreshToken
+    );
+    await storeRefreshToken(user, tokens.refreshToken);
+
+    // Set cookies for backward compatibility
+    res.cookie('accessToken', tokens.accessToken, getCookieOptions(15 * 60 * 1000));
+    res.cookie('refreshToken', tokens.refreshToken, getCookieOptions(REFRESH_TOKEN_EXPIRY_MS));
+
+    // Also return tokens in response body for localStorage
+    res.json({
+      success: true,
+      message: 'Token refreshed successfully',
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken
+    });
+
+  } catch (error) {
+    console.error('Token refresh error:', error);
+    
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ 
+        error: 'Refresh token expired',
+        code: 'TOKEN_EXPIRED'
+      });
+    }
+
+    res.status(401).json({ 
+      error: 'Invalid refresh token',
+      code: 'INVALID_TOKEN'
+    });
+  }
+});
+
+/**
+ * ✅ FIXED: Revoke all sessions - now uses authenticateJWT middleware
+ */
+router.post('/revoke-all-sessions', authenticateJWT, async (req, res) => {
+  try {
+    const user = req.user; // Already authenticated by middleware
+
+    // Clear all refresh tokens
+    user.security.refresh_tokens = [];
+    await user.save();
+
+    // Clear cookies
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      path: '/'
+    };
+
+    res.clearCookie('accessToken', cookieOptions);
+    res.clearCookie('refreshToken', cookieOptions);
+
+    res.json({
+      success: true,
+      message: 'All sessions revoked successfully'
+    });
+
+  } catch (error) {
+    console.error('Revoke sessions error:', error);
+    res.status(500).json({ 
+      error: 'Failed to revoke sessions',
+      code: 'REVOKE_FAILED'
+    });
+  }
+});
+
+// ============================================
+// SESSION MANAGEMENT ROUTES
+// ============================================
+
+/**
+ * ✅ FIXED: Get user - checks both Authorization header and cookies
+ */
+router.get('/user', async (req, res) => {
+  try {
+    // Check Authorization header first, then cookies
+    let accessToken = req.headers.authorization?.replace('Bearer ', '');
+    
+    if (!accessToken) {
+      accessToken = req.cookies?.accessToken;
+    }
+
+    if (!accessToken) {
+      return res.status(401).json({
+        error: 'Not authenticated',
         code: 'NO_TOKEN'
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(accessToken, process.env.JWT_SECRET);
     const user = await User.findById(decoded.id);
 
-    if (!user || !user.flags.is_active) {
-      return res.status(401).json({ 
+    if (!user || !user.flags?.is_active) {
+      return res.status(401).json({
         error: 'User not found or inactive',
         code: 'INVALID_USER'
       });
     }
 
-    req.user = user;
-    next();
+    res.json({
+      success: true,
+      user: {
+        id: user._id,
+        email: user.email,
+        name: user.name,
+        picture: user.picture,
+        plan: user.subscription?.plan || 'free',
+        credits: user.credits?.balance || 100,
+        createdAt: user.timestamps?.created_at || user.createdAt,
+        lastLogin: user.timestamps?.last_login || new Date()
+      }
+    });
 
   } catch (error) {
     if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ 
-        error: 'Access token expired',
-        code: 'TOKEN_EXPIRED',
-        expiredAt: error.expiredAt
+      return res.status(401).json({
+        error: 'Token expired',
+        code: 'TOKEN_EXPIRED'
       });
     }
-    
+
     if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({ 
+      return res.status(401).json({
         error: 'Invalid token',
         code: 'INVALID_TOKEN'
       });
     }
 
-    return res.status(401).json({ 
-      error: 'Authentication failed',
+    console.error('Get user error:', error);
+    res.status(401).json({
+      error: 'Not authenticated',
       code: 'AUTH_FAILED'
     });
   }
-};
+});
 
-// ============================================
-// OPTIONAL AUTH (doesn't fail if no token)
-// ============================================
-
-exports.optionalAuth = async (req, res, next) => {
+/**
+ * ✅ FIXED: Logout - now uses authenticateJWT middleware
+ */
+router.post('/logout', authenticateJWT, async (req, res) => {
   try {
-    const token = req.cookies?.accessToken || 
-                  req.headers.authorization?.replace('Bearer ', '');
+    const user = req.user;
+    
+    // Get refresh token from cookies or body
+    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
 
-    if (token) {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(decoded.id);
-      
-      if (user && user.flags.is_active) {
-        req.user = user;
-      }
+    // Remove the current refresh token
+    if (refreshToken && user.security?.refresh_tokens) {
+      user.security.refresh_tokens = user.security.refresh_tokens.filter(
+        t => t.token !== refreshToken
+      );
+      await user.save();
     }
+
+    // Clear cookies
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      path: '/'
+    };
+
+    res.clearCookie('accessToken', cookieOptions);
+    res.clearCookie('refreshToken', cookieOptions);
+
+    res.json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+
   } catch (error) {
-    // Silent fail for optional auth
+    console.error('Logout error:', error);
+    
+    // Always clear cookies even if there's an error
+    res.clearCookie('accessToken');
+    res.clearCookie('refreshToken');
+    
+    res.json({ 
+      success: true, 
+      message: 'Logged out' 
+    });
   }
-  
-  next();
-};
+});
 
-// ============================================
-// PLAN-BASED ACCESS CONTROL
-// ============================================
-
-exports.requirePlan = (...allowedPlans) => {
-  return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    const userPlan = req.user.subscription?.plan || 'free';
-
-    if (!allowedPlans.includes(userPlan)) {
-      return res.status(403).json({ 
-        error: 'This feature requires a premium plan',
-        current_plan: userPlan,
-        required_plans: allowedPlans
-      });
-    }
-
-    next();
-  };
-};
-
-// ============================================
-// RATE LIMITING (IP + User based)
-// ============================================
-
-const rateLimitStore = new Map();
-
-exports.rateLimit = (options = {}) => {
-  const {
-    windowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-    maxRequests = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
-    message = 'Too many requests, please try again later'
-  } = options;
-
-  return (req, res, next) => {
-    const key = req.user?._id?.toString() || 
-                req.ip || 
-                req.headers['x-forwarded-for']?.split(',')[0] ||
-                req.connection.remoteAddress;
-
-    const now = Date.now();
-    const record = rateLimitStore.get(key) || { count: 0, resetTime: now + windowMs };
-
-    if (now > record.resetTime) {
-      record.count = 0;
-      record.resetTime = now + windowMs;
-    }
-
-    record.count++;
-    rateLimitStore.set(key, record);
-
-    // Clean up old entries (1% chance)
-    if (Math.random() < 0.01) {
-      for (const [k, v] of rateLimitStore.entries()) {
-        if (now > v.resetTime) {
-          rateLimitStore.delete(k);
-        }
-      }
-    }
-
-    if (record.count > maxRequests) {
-      return res.status(429).json({ 
-        error: message,
-        retry_after: Math.ceil((record.resetTime - now) / 1000)
-      });
-    }
-
-    res.setHeader('X-RateLimit-Limit', maxRequests);
-    res.setHeader('X-RateLimit-Remaining', Math.max(0, maxRequests - record.count));
-    res.setHeader('X-RateLimit-Reset', new Date(record.resetTime).toISOString());
-
-    next();
-  };
-};
-
-// ============================================
-// IP TRACKING
-// ============================================
-
-exports.trackIP = async (req, res, next) => {
-  if (req.user) {
-    try {
-      const ipAddress = req.ip || 
-                       req.headers['x-forwarded-for']?.split(',')[0] || 
-                       req.connection.remoteAddress;
-      
-      req.user.security = req.user.security || {};
-      req.user.security.last_ip_address = ipAddress;
-      
-      req.user.security.ip_addresses = req.user.security.ip_addresses || [];
-      const existingIP = req.user.security.ip_addresses.find(ip => ip.ip === ipAddress);
-      
-      if (!existingIP) {
-        req.user.security.ip_addresses.push({
-          ip: ipAddress,
-          timestamp: new Date()
-        });
-        
-        if (req.user.security.ip_addresses.length > 20) {
-          req.user.security.ip_addresses = req.user.security.ip_addresses.slice(-20);
-        }
-      }
-      
-      await req.user.save();
-    } catch (error) {
-      // Silent fail for IP tracking
-    }
-  }
-  next();
-};
-
-// ============================================
-// SECURITY HEADERS
-// ============================================
-
-exports.securityHeaders = (req, res, next) => {
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  next();
-};
-
-// ============================================
-// LEGACY SESSION-BASED AUTH
-// ============================================
-
-exports.isAuthenticated = (req, res, next) => {
-  if (req.isAuthenticated()) {
-    return next();
-  }
-  res.status(401).json({ error: 'Unauthorized - Please login' });
-};
-
-module.exports = exports;
+module.exports = router;
