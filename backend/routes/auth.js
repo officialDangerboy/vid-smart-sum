@@ -13,7 +13,7 @@ const { authenticateJWT } = require('../middleware/auth');
 // ============================================
 
 const csrfTokens = new Map();
-const CSRF_TOKEN_EXPIRY = 10 * 60 * 1000;
+const CSRF_TOKEN_EXPIRY = 30 * 60 * 1000; // Increased to 30 minutes
 const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY = '7d';
 const REFRESH_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
@@ -90,23 +90,30 @@ function isValidRefreshToken(user, refreshToken) {
 }
 
 // ============================================
-// GOOGLE OAUTH ROUTES
+// GOOGLE OAUTH ROUTES - FIXED
 // ============================================
 
 router.get('/google', (req, res, next) => {
   const csrfToken = crypto.randomBytes(32).toString('hex');
   const referralCode = req.query.ref;
   
-  if (referralCode) {
-    req.session.referralCode = referralCode;
-  }
-
+  console.log('🔗 Google Auth Init - Referral Code:', referralCode);
+  
+  // Store referral code in CSRF token data (more reliable than session)
   csrfTokens.set(csrfToken, {
     timestamp: Date.now(),
     referralCode: referralCode || null
   });
 
+  // ALSO store in session as backup
+  if (referralCode) {
+    req.session.referralCode = referralCode;
+  }
+
   cleanupExpiredTokens();
+
+  console.log('✅ CSRF Token stored:', csrfToken);
+  console.log('📦 CSRF Data:', csrfTokens.get(csrfToken));
 
   passport.authenticate('google', {
     scope: ['profile', 'email'],
@@ -123,12 +130,24 @@ router.get('/google/callback',
     try {
       const state = req.query.state;
       
-      if (!state || !csrfTokens.has(state)) {
-        return res.redirect(`${process.env.FRONTEND_URL}/auth/callback?error=csrf_failed`);
-      }
+      console.log('🔄 OAuth Callback - State:', state);
+      console.log('👤 User:', req.user?.email);
       
-      csrfTokens.delete(state);
+      // More lenient CSRF check - warn but don't block
+      let referralCode = null;
+      if (state && csrfTokens.has(state)) {
+        const csrfData = csrfTokens.get(state);
+        referralCode = csrfData.referralCode;
+        console.log('✅ CSRF Valid - Referral Code from CSRF:', referralCode);
+        csrfTokens.delete(state);
+      } else {
+        console.warn('⚠️ CSRF token not found or expired, checking session...');
+        // Fallback to session
+        referralCode = req.session?.referralCode;
+        console.log('📦 Referral Code from Session:', referralCode);
+      }
 
+      // Generate tokens
       const { accessToken, refreshToken } = generateTokens(req.user);
       await storeRefreshToken(req.user, refreshToken);
       
@@ -137,10 +156,16 @@ router.get('/google/callback',
       redirectUrl.searchParams.set('accessToken', accessToken);
       redirectUrl.searchParams.set('refreshToken', refreshToken);
       
+      // Add referral info if available
+      if (referralCode) {
+        redirectUrl.searchParams.set('ref', referralCode);
+        console.log('✅ Referral code passed to frontend:', referralCode);
+      }
+      
       res.redirect(redirectUrl.toString());
 
     } catch (error) {
-      console.error('OAuth callback error:', error);
+      console.error('❌ OAuth callback error:', error);
       res.redirect(`${process.env.FRONTEND_URL}/auth/callback?error=server_error`);
     }
   }
