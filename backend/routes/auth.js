@@ -5,8 +5,8 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const User = require('../models/User');
 
-// Import middleware from the NEW authMiddleware file
-const { authenticateJWT } = require('../middleware/authMiddleware');
+// Import middleware from auth middleware file
+const { authenticateJWT } = require('../middleware/auth');
 
 // ============================================
 // CONFIGURATION & CONSTANTS
