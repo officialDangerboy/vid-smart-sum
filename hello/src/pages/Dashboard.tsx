@@ -8,15 +8,13 @@ import {
   LogOut, User, Mail, Calendar, CreditCard,
   TrendingUp, Clock, Video, Share2, Crown, Zap, Copy, Check,
   Shield, AlertCircle, Sparkles, RefreshCw, Settings, History,
-  BarChart3, Infinity, FileText, Star, Trophy, Target,
-  Activity, Download, MessageSquare, Lock, Unlock
+  Infinity, Download, MessageSquare, Lock, Unlock, Target, Activity, Trophy
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "../App";
 import { useState, useEffect } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
@@ -29,16 +27,14 @@ const Dashboard = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
+  // FIXED: Proper API URL configuration
   const API_URL = import.meta.env.VITE_API_URL || "https://vid-smart-sum.vercel.app";
-
-  const getApiUrl = (path) => {
-    return import.meta.env.DEV ? path : `${API_URL}${path}`;
-  };
 
   useEffect(() => {
     fetchUserData();
   }, []);
 
+  // FIXED: Proper auth headers with Bearer token
   const getAuthHeaders = () => {
     const accessToken = localStorage.getItem('accessToken');
     return {
@@ -47,28 +43,37 @@ const Dashboard = () => {
     };
   };
 
+  // FIXED: Complete fetchUserData with proper error handling
   const fetchUserData = async () => {
     try {
       setError(null);
-      console.log('📡 Fetching user profile...');
+      console.log('📡 Fetching user profile from:', `${API_URL}/api/user/profile`);
 
       const response = await fetch(`${API_URL}/api/user/profile`, {
+        method: 'GET',
         credentials: 'include',
-        headers: getAuthHeaders() // ✅ Now includes Bearer token
+        headers: getAuthHeaders()
       });
 
       console.log('📡 Profile response status:', response.status);
 
       if (response.ok) {
         const data = await response.json();
-        console.log('✅ Profile data loaded:', data.user.email);
-        setUserData(data.user);
-        setRetryCount(0);
+        console.log('✅ Profile data loaded successfully');
+        
+        // FIXED: Handle the backend response structure
+        if (data.success && data.user) {
+          setUserData(data.user);
+          setRetryCount(0);
+        } else {
+          throw new Error('Invalid response structure');
+        }
       } else {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
         console.error('❌ Profile fetch failed:', errorData);
 
         if (response.status === 401) {
+          // Token expired or invalid
           if (errorData.code === 'TOKEN_EXPIRED') {
             console.log('🔄 Token expired, attempting refresh...');
             const refreshed = await refreshToken();
@@ -79,6 +84,7 @@ const Dashboard = () => {
             }
           }
 
+          // Authentication failed completely
           console.log('❌ Authentication failed, logging out...');
           toast({
             title: "Session expired",
@@ -86,13 +92,17 @@ const Dashboard = () => {
             variant: "destructive",
           });
 
-          // Clear tokens before logout
           localStorage.removeItem('accessToken');
           localStorage.removeItem('refreshToken');
           await logout();
           navigate('/login');
         } else {
           setError(errorData.error || 'Failed to load profile');
+          toast({
+            title: "Error loading profile",
+            description: errorData.error || "Please try again",
+            variant: "destructive",
+          });
         }
       }
     } catch (error) {
@@ -100,8 +110,8 @@ const Dashboard = () => {
       setError('Network error. Please check your connection.');
 
       toast({
-        title: "Error",
-        description: "Failed to load your profile. Please try refreshing.",
+        title: "Connection Error",
+        description: "Failed to load your profile. Please check your internet connection.",
         variant: "destructive",
       });
     } finally {
@@ -109,6 +119,7 @@ const Dashboard = () => {
     }
   };
 
+  // FIXED: Proper token refresh implementation
   const refreshToken = async () => {
     try {
       console.log('🔄 Refreshing access token...');
@@ -132,7 +143,6 @@ const Dashboard = () => {
         const data = await response.json();
         console.log('✅ Token refreshed successfully');
 
-        // Update localStorage with new tokens
         if (data.accessToken) {
           localStorage.setItem('accessToken', data.accessToken);
         }
@@ -153,6 +163,7 @@ const Dashboard = () => {
     }
   };
 
+  // FIXED: Proper logout implementation
   const handleLogout = async () => {
     try {
       await fetch(`${API_URL}/auth/logout`, {
@@ -161,7 +172,6 @@ const Dashboard = () => {
         headers: getAuthHeaders()
       });
 
-      // Clear tokens
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');
 
@@ -176,14 +186,12 @@ const Dashboard = () => {
       // Clear tokens anyway
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');
-      toast({
-        title: "Logout failed",
-        description: "An error occurred. Please try again.",
-        variant: "destructive",
-      });
+      await logout();
+      navigate('/login');
     }
   };
 
+  // FIXED: Logout all devices
   const handleLogoutAllDevices = async () => {
     try {
       const response = await fetch(`${API_URL}/auth/revoke-all-sessions`, {
@@ -200,7 +208,11 @@ const Dashboard = () => {
           title: "Logged out from all devices",
           description: "All your sessions have been terminated.",
         });
+        
+        await logout();
         navigate('/login');
+      } else {
+        throw new Error('Failed to logout from all devices');
       }
     } catch (error) {
       console.error('Logout all devices failed:', error);
@@ -212,6 +224,7 @@ const Dashboard = () => {
     }
   };
 
+  // FIXED: Copy referral code
   const copyReferralCode = () => {
     if (userData?.referral?.code) {
       const referralUrl = `${window.location.origin}/login?ref=${userData.referral.code}`;
@@ -225,6 +238,7 @@ const Dashboard = () => {
     }
   };
 
+  // FIXED: Refresh data
   const handleRefreshData = async () => {
     setRefreshing(true);
     await fetchUserData();
@@ -235,10 +249,11 @@ const Dashboard = () => {
     });
   };
 
+  // Error state
   if (error && !loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5">
-        <div className="text-center space-y-4 max-w-md">
+        <div className="text-center space-y-4 max-w-md p-6">
           <AlertCircle className="w-16 h-16 text-destructive mx-auto" />
           <h2 className="text-2xl font-bold">Failed to Load Dashboard</h2>
           <p className="text-muted-foreground">{error}</p>
@@ -257,6 +272,7 @@ const Dashboard = () => {
     );
   }
 
+  // Loading state
   if (loading || !user || !userData) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -271,12 +287,15 @@ const Dashboard = () => {
     );
   }
 
+  // FIXED: Use correct field names from backend
   const isPro = userData.subscription?.plan === 'pro';
+  
   const getInitials = (name) => {
     return name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'U';
   };
 
   const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'long',
@@ -284,12 +303,23 @@ const Dashboard = () => {
     });
   };
 
-  const creditPercentage = isPro ? 100 : Math.min(100, (userData.credits.balance / userData.credits.monthly_allocation) * 100);
-  const daysUntilReset = Math.ceil((new Date(userData.credits.next_reset_at) - new Date()) / (1000 * 60 * 60 * 24));
+  // FIXED: Proper credit percentage calculation
+  const creditPercentage = isPro 
+    ? 100 
+    : Math.min(100, (userData.credits?.balance / userData.credits?.monthly_allocation) * 100);
+  
+  const daysUntilReset = userData.credits?.next_reset_at 
+    ? Math.max(0, Math.ceil((new Date(userData.credits.next_reset_at) - new Date()) / (1000 * 60 * 60 * 24)))
+    : 0;
 
-  // Calculate usage percentages
-  const dailyUsagePercentage = isPro ? 0 : (userData.usage.summaries_today / userData.usage.limits.daily_summaries) * 100;
-  const monthlyUsagePercentage = isPro ? 0 : (userData.usage.summaries_this_month / userData.usage.limits.monthly_summaries) * 100;
+  // FIXED: Proper usage percentage calculations
+  const dailyUsagePercentage = isPro 
+    ? 0 
+    : (userData.usage?.summaries_today / userData.usage?.limits?.daily_summaries) * 100;
+  
+  const monthlyUsagePercentage = isPro 
+    ? 0 
+    : (userData.usage?.summaries_this_month / userData.usage?.limits?.monthly_summaries) * 100;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5 pt-24 px-4 pb-12">
@@ -334,13 +364,14 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Alert Messages - Different for Pro and Free */}
-        {!isPro && userData.credits.balance < 10 && (
+        {/* Alert Messages */}
+        {!isPro && userData.credits?.balance < 10 && (
           <Alert className="mb-6 border-orange-500/50 bg-orange-500/10">
             <AlertCircle className="h-4 w-4 text-orange-500" />
-            <AlertDescription className="flex items-center justify-between">
+            <AlertDescription className="flex items-center justify-between flex-wrap gap-2">
               <span>
-                You're running low on credits! Only <strong>{userData.credits.balance}</strong> left. Resets in {daysUntilReset} days.
+                You're running low on credits! Only <strong>{userData.credits.balance}</strong> left. 
+                {daysUntilReset > 0 && ` Resets in ${daysUntilReset} days.`}
               </span>
               <Button size="sm" onClick={() => navigate('/pricing')}>
                 <Zap className="w-4 h-4 mr-2" />
@@ -350,10 +381,10 @@ const Dashboard = () => {
           </Alert>
         )}
 
-        {isPro && userData.subscription.cancel_at_period_end && (
+        {isPro && userData.subscription?.cancel_at_period_end && (
           <Alert className="mb-6 border-orange-500/50 bg-orange-500/10">
             <AlertCircle className="h-4 w-4 text-orange-500" />
-            <AlertDescription className="flex items-center justify-between">
+            <AlertDescription className="flex items-center justify-between flex-wrap gap-2">
               <span>
                 Your Pro subscription is set to cancel on {formatDate(userData.subscription.current_period_end)}
               </span>
@@ -382,9 +413,9 @@ const Dashboard = () => {
               <div className="flex flex-col items-center text-center space-y-4">
                 <div className="relative">
                   <Avatar className={`w-24 h-24 ring-4 ${isPro ? 'ring-amber-500/30' : 'ring-primary/10'}`}>
-                    <AvatarImage src={user.picture} alt={user.name} />
+                    <AvatarImage src={userData.picture} alt={userData.name} />
                     <AvatarFallback className={`text-2xl ${isPro ? 'bg-gradient-to-br from-amber-500 to-orange-500' : 'bg-gradient-to-br from-primary to-accent'} text-white`}>
-                      {getInitials(user.name)}
+                      {getInitials(userData.name)}
                     </AvatarFallback>
                   </Avatar>
                   {isPro && (
@@ -397,18 +428,18 @@ const Dashboard = () => {
                 <div className="space-y-2 w-full">
                   <div className="flex items-center gap-2 text-sm justify-center">
                     <User className="w-4 h-4 text-muted-foreground" />
-                    <span className="font-medium">{user.name}</span>
+                    <span className="font-medium">{userData.name}</span>
                   </div>
 
                   <div className="flex items-center gap-2 text-sm justify-center">
                     <Mail className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-muted-foreground truncate max-w-[200px]">{user.email}</span>
+                    <span className="text-muted-foreground truncate max-w-[200px]">{userData.email}</span>
                   </div>
 
                   <div className="flex items-center gap-2 text-sm justify-center">
                     <Calendar className="w-4 h-4 text-muted-foreground" />
                     <span className="text-muted-foreground text-xs">
-                      Member since {formatDate(userData.timestamps.created_at)}
+                      Member since {formatDate(userData.timestamps?.created_at)}
                     </span>
                   </div>
                 </div>
@@ -424,19 +455,19 @@ const Dashboard = () => {
                     </div>
                   </div>
 
-                  {isPro && (
+                  {isPro && userData.subscription?.billing_cycle && (
                     <div>
                       <div className="text-xs text-muted-foreground mb-1">Billing Cycle</div>
                       <div className="flex items-center justify-center gap-2">
                         <CreditCard className="w-3 h-3 text-muted-foreground" />
                         <span className="font-semibold text-sm capitalize">
-                          {userData.subscription.billing_cycle || 'Monthly'}
+                          {userData.subscription.billing_cycle}
                         </span>
                       </div>
                     </div>
                   )}
 
-                  {isPro && userData.subscription.current_period_end && (
+                  {isPro && userData.subscription?.current_period_end && (
                     <div>
                       <div className="text-xs text-muted-foreground mb-1">Next Billing Date</div>
                       <div className="text-xs font-medium">
@@ -471,7 +502,7 @@ const Dashboard = () => {
             </CardContent>
           </Card>
 
-          {/* Credits/Usage Card - Different for Pro and Free */}
+          {/* Credits/Usage Card */}
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -540,21 +571,23 @@ const Dashboard = () => {
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">This Month</p>
                       <p className="text-2xl font-bold text-amber-500">
-                        {userData.usage.summaries_this_month}
+                        {userData.usage?.summaries_this_month || 0}
                       </p>
                       <p className="text-xs text-muted-foreground">Summaries created</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Time Saved</p>
                       <p className="text-2xl font-bold text-green-500">
-                        {userData.usage.total_time_saved}h
+                        {userData.usage?.total_time_saved || 0}h
                       </p>
                       <p className="text-xs text-muted-foreground">All time</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Member Since</p>
                       <p className="text-2xl font-bold">
-                        {Math.ceil((new Date() - new Date(userData.subscription.started_at)) / (1000 * 60 * 60 * 24))}d
+                        {userData.subscription?.started_at 
+                          ? Math.ceil((new Date() - new Date(userData.subscription.started_at)) / (1000 * 60 * 60 * 24))
+                          : 0}d
                       </p>
                       <p className="text-xs text-muted-foreground">Days active</p>
                     </div>
@@ -567,19 +600,19 @@ const Dashboard = () => {
                     <div className="space-y-1">
                       <p className="text-sm text-muted-foreground">Current Balance</p>
                       <p className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-                        {userData.credits.balance}
+                        {userData.credits?.balance || 0}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        of {userData.credits.monthly_allocation} monthly
+                        of {userData.credits?.monthly_allocation || 0} monthly
                       </p>
                     </div>
                     <div className="space-y-1">
                       <p className="text-sm text-muted-foreground">Used This Month</p>
                       <p className="text-3xl font-bold text-muted-foreground">
-                        {userData.credits.monthly_allocation - userData.credits.balance}
+                        {(userData.credits?.monthly_allocation || 0) - (userData.credits?.balance || 0)}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {userData.credits.lifetime_spent} lifetime
+                        {userData.credits?.lifetime_spent || 0} lifetime
                       </p>
                     </div>
                   </div>
@@ -591,8 +624,8 @@ const Dashboard = () => {
                     </div>
                     <Progress value={creditPercentage} className="h-2" />
                     <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>{userData.credits.balance} remaining</span>
-                      <span>Resets in {daysUntilReset} days</span>
+                      <span>{userData.credits?.balance || 0} remaining</span>
+                      {daysUntilReset > 0 && <span>Resets in {daysUntilReset} days</span>}
                     </div>
                   </div>
 
@@ -610,12 +643,12 @@ const Dashboard = () => {
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">Daily Summaries</span>
                         <span className="font-medium">
-                          {userData.usage.summaries_today} / {userData.usage.limits.daily_summaries}
+                          {userData.usage?.summaries_today || 0} / {userData.usage?.limits?.daily_summaries || 0}
                         </span>
                       </div>
                       <Progress value={dailyUsagePercentage} className="h-1.5" />
                       <p className="text-xs text-muted-foreground">
-                        {userData.usage.limits.daily_summaries - userData.usage.summaries_today} remaining today
+                        {Math.max(0, (userData.usage?.limits?.daily_summaries || 0) - (userData.usage?.summaries_today || 0))} remaining today
                       </p>
                     </div>
 
@@ -624,12 +657,12 @@ const Dashboard = () => {
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">Monthly Summaries</span>
                         <span className="font-medium">
-                          {userData.usage.summaries_this_month} / {userData.usage.limits.monthly_summaries}
+                          {userData.usage?.summaries_this_month || 0} / {userData.usage?.limits?.monthly_summaries || 0}
                         </span>
                       </div>
                       <Progress value={monthlyUsagePercentage} className="h-1.5" />
                       <p className="text-xs text-muted-foreground">
-                        {userData.usage.limits.monthly_summaries - userData.usage.summaries_this_month} remaining this month
+                        {Math.max(0, (userData.usage?.limits?.monthly_summaries || 0) - (userData.usage?.summaries_this_month || 0))} remaining this month
                       </p>
                     </div>
 
@@ -640,7 +673,7 @@ const Dashboard = () => {
                         <span className="text-sm font-medium">Video Duration Limit</span>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        Maximum {Math.floor(userData.usage.limits.video_duration_seconds / 60)} minutes per video
+                        Maximum {Math.floor((userData.usage?.limits?.video_duration_seconds || 1200) / 60)} minutes per video
                       </p>
                     </div>
                   </div>
@@ -649,13 +682,13 @@ const Dashboard = () => {
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Bonus Credits</p>
                       <p className="text-lg font-semibold text-green-600">
-                        +{userData.credits.referral_credits}
+                        +{userData.credits?.referral_credits || 0}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Lifetime Earned</p>
                       <p className="text-lg font-semibold">
-                        {userData.credits.lifetime_earned}
+                        {userData.credits?.lifetime_earned || 0}
                       </p>
                     </div>
                     <div>
@@ -683,7 +716,7 @@ const Dashboard = () => {
           </Card>
         </div>
 
-        {/* Stats Grid - Different metrics for Pro and Free */}
+        {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="pb-3">
@@ -693,15 +726,15 @@ const Dashboard = () => {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{userData.usage.total_summaries}</div>
+              <div className="text-3xl font-bold">{userData.usage?.total_summaries || 0}</div>
               <p className="text-xs text-muted-foreground mt-1">
-                {userData.usage.summaries_this_month} this month
+                {userData.usage?.summaries_this_month || 0} this month
               </p>
               {!isPro && (
                 <div className="flex items-center gap-1 mt-2 text-xs">
                   <Lock className="w-3 h-3 text-muted-foreground" />
                   <span className="text-muted-foreground">
-                    {userData.usage.limits.daily_summaries - userData.usage.summaries_today} left today
+                    {Math.max(0, (userData.usage?.limits?.daily_summaries || 0) - (userData.usage?.summaries_today || 0))} left today
                   </span>
                 </div>
               )}
@@ -722,19 +755,18 @@ const Dashboard = () => {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{userData.usage.total_time_saved}h</div>
+              <div className="text-3xl font-bold">{userData.usage?.total_time_saved || 0}h</div>
               <p className="text-xs text-muted-foreground mt-1">
                 Across all summaries
               </p>
               <div className="flex items-center gap-1 mt-2 text-green-600 text-xs">
                 <TrendingUp className="w-3 h-3" />
-                <span>+{Math.round(userData.usage.total_time_saved / 10)}h this month</span>
+                <span>+{Math.round((userData.usage?.total_time_saved || 0) / 10)}h this month</span>
               </div>
             </CardContent>
           </Card>
 
           {isPro ? (
-            // Pro-specific stat: Premium Features Used
             <Card className="hover:shadow-lg transition-shadow border-amber-500/20 bg-gradient-to-br from-amber-500/5 to-orange-500/5">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -744,7 +776,7 @@ const Dashboard = () => {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold text-amber-500">
-                  {Object.values(userData.features).filter(f => f === true).length}
+                  {userData.features ? Object.values(userData.features).filter(f => f === true).length : 0}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
                   Features unlocked
@@ -756,7 +788,6 @@ const Dashboard = () => {
               </CardContent>
             </Card>
           ) : (
-            // Free user stat: Lifetime Credits
             <Card className="hover:shadow-lg transition-shadow">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -766,13 +797,13 @@ const Dashboard = () => {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold text-green-600">
-                  {userData.credits.lifetime_earned}
+                  {userData.credits?.lifetime_earned || 0}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
                   Total earned credits
                 </p>
                 <p className="text-xs text-primary mt-2">
-                  +{userData.credits.referral_credits} from referrals
+                  +{userData.credits?.referral_credits || 0} from referrals
                 </p>
               </CardContent>
             </Card>
@@ -786,19 +817,19 @@ const Dashboard = () => {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{userData.referral.total_referrals}</div>
+              <div className="text-3xl font-bold">{userData.referral?.total_referrals || 0}</div>
               <p className="text-xs text-muted-foreground mt-1">
                 Friends invited
               </p>
               <p className="text-xs text-green-600 mt-2">
-                +{userData.referral.total_credits_earned} credits earned
+                +{userData.referral?.total_credits_earned || 0} credits earned
               </p>
             </CardContent>
           </Card>
         </div>
 
-        {/* Features Overview - Only show for Pro users */}
-        {isPro && (
+        {/* Features Overview - Only for Pro users */}
+        {isPro && userData.features && (
           <Card className="mb-8 border-amber-500/20 bg-gradient-to-br from-amber-500/5 to-orange-500/5">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -884,8 +915,8 @@ const Dashboard = () => {
             </CardTitle>
             <CardDescription>
               {isPro
-                ? "Share your referral link and help friends discover Pro features! Each referral extends your Pro membership."
-                : "Share your referral link and get 10 credits for each friend who signs up! Your friends get 5 bonus credits too! 🎁"}
+                ? "Share your referral link and help friends discover Pro features!"
+                : "Share your referral link and get 10 credits for each friend who signs up! 🎁"}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -895,13 +926,14 @@ const Dashboard = () => {
                   <label className="text-xs text-muted-foreground mb-1 block">Your Referral Link</label>
                   <div className="flex items-center gap-2 p-3 bg-background rounded-lg border">
                     <code className="flex-1 text-sm font-mono truncate">
-                      {window.location.origin}/login?ref={userData.referral.code || 'Loading...'}
+                      {window.location.origin}/login?ref={userData.referral?.code || 'Loading...'}
                     </code>
                     <Button
                       size="sm"
                       variant="ghost"
                       onClick={copyReferralCode}
                       className="shrink-0"
+                      disabled={!userData.referral?.code}
                     >
                       {copied ? (
                         <>
@@ -933,7 +965,7 @@ const Dashboard = () => {
                   </div>
                 )}
                 <div className={`text-center ${isPro ? 'col-span-3' : ''}`}>
-                  <p className="text-2xl font-bold">{userData.referral.total_referrals}</p>
+                  <p className="text-2xl font-bold">{userData.referral?.total_referrals || 0}</p>
                   <p className="text-xs text-muted-foreground">Total referred</p>
                 </div>
               </div>
@@ -950,7 +982,7 @@ const Dashboard = () => {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {userData.usage.total_summaries === 0 ? (
+            {(userData.usage?.total_summaries || 0) === 0 ? (
               <div className="text-center py-12">
                 <Video className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
                 <p className="text-muted-foreground mb-2">
@@ -958,7 +990,7 @@ const Dashboard = () => {
                 </p>
                 {!isPro && (
                   <p className="text-sm text-muted-foreground mb-4">
-                    You have <span className="font-bold text-primary">{userData.credits.balance} credits</span> available
+                    You have <span className="font-bold text-primary">{userData.credits?.balance || 0} credits</span> available
                   </p>
                 )}
                 {isPro && (
@@ -977,7 +1009,7 @@ const Dashboard = () => {
                 <div className="text-center py-8">
                   <Activity className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
                   <p className="text-muted-foreground mb-2">
-                    You've created <strong>{userData.usage.total_summaries}</strong> summaries so far!
+                    You've created <strong>{userData.usage?.total_summaries || 0}</strong> summaries so far!
                   </p>
                   {isPro && (
                     <p className="text-sm text-amber-600 mb-4 flex items-center justify-center gap-2">
@@ -988,7 +1020,7 @@ const Dashboard = () => {
                   <p className="text-sm text-muted-foreground mb-4">
                     View your complete history
                   </p>
-                  <div className="flex gap-3 justify-center">
+                  <div className="flex gap-3 justify-center flex-wrap">
                     <Button variant="outline" onClick={() => navigate('/history')}>
                       <History className="w-4 h-4 mr-2" />
                       View All History
