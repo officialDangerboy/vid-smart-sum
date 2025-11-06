@@ -48,9 +48,11 @@ router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
       };
     }
     
-    // Generate referral code if doesn't exist
+    // Generate referral code if doesn't exist - FIXED VERSION
     if (!user.referral.code) {
       await user.generateReferralCode();
+      // Save the user AFTER generating the code, outside the method
+      await user.save();
     }
     
     res.json({
@@ -100,36 +102,37 @@ router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
             video_duration_seconds: user.usage?.limits?.video_duration_seconds || 1200
           },
           
-          daily_reset_at: user.usage?.daily_reset_at || new Date()
+          daily_reset_at: user.usage?.daily_reset_at
         },
         
-        // Features (for Pro users)
-        features: {
-          unlimited_summaries: user.features?.unlimited_summaries || false,
-          unlimited_video_length: user.features?.unlimited_video_length || false,
-          premium_ai_models: user.features?.premium_ai_models || false,
-          export_summaries: user.features?.export_summaries || false,
-          priority_support: user.features?.priority_support || false
-        },
+        // Preferences
+        preferences: user.preferences,
         
-        // Referral
+        // Features
+        features: user.features,
+        
+        // Referral info
         referral: {
-          code: user.referral?.code || null,
+          code: user.referral.code,
           total_referrals: user.referral?.total_referrals || 0,
           total_credits_earned: user.referral?.total_credits_earned || 0
         },
         
         // Timestamps
         timestamps: {
-          created_at: user.timestamps?.created_at || user.createdAt,
-          last_login: user.timestamps?.last_login || new Date(),
-          last_activity: user.timestamps?.last_activity || new Date()
+          created_at: user.timestamps?.created_at,
+          last_activity: user.timestamps?.last_activity,
+          last_login: user.timestamps?.last_login
         }
       }
     });
+    
   } catch (error) {
     console.error('Profile error:', error);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({
+      error: 'Failed to fetch profile',
+      message: error.message
+    });
   }
 });
 

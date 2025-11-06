@@ -92,16 +92,27 @@ const referralSchema = new mongoose.Schema({
   }
 });
 
+// FIXED: IP Address schema without _id conflict
+const ipAddressSchema = new mongoose.Schema({
+  ip: {
+    type: String,
+    required: true
+  },
+  timestamp: {
+    type: Date,
+    default: Date.now
+  }
+}, { _id: false }); // IMPORTANT: Disable auto _id generation
+
 // ============================================
 // MAIN USER SCHEMA
 // ============================================
 
 const userSchema = new mongoose.Schema({
-  // Basic Info
+  // Basic Info - FIXED: Removed duplicate unique constraints
   googleId: {
     type: String,
     required: true,
-    unique: true,
     unique: true
   },
   email: {
@@ -109,8 +120,7 @@ const userSchema = new mongoose.Schema({
     required: true,
     unique: true,
     lowercase: true,
-    trim: true,
-    unique: true
+    trim: true
   },
   name: {
     type: String,
@@ -156,19 +166,17 @@ const userSchema = new mongoose.Schema({
     }
   },
 
-  // Subscription
+  // Subscription - FIXED: Removed unique constraints on enum fields
   subscription: {
     plan: {
       type: String,
       enum: ['free', 'pro'],
-      default: 'free',
-      unique: true
+      default: 'free'
     },
     status: {
       type: String,
       enum: ['active', 'inactive', 'cancelled', 'expired', 'past_due'],
-      default: 'active',
-      unique: true
+      default: 'active'
     },
     billing_cycle: {
       type: String,
@@ -188,11 +196,13 @@ const userSchema = new mongoose.Schema({
     cancelled_at: Date,
     stripe_customer_id: {
       type: String,
-      unique: true
+      unique: true,
+      sparse: true // Allow null values
     },
     stripe_subscription_id: {
       type: String,
-      unique: true
+      unique: true,
+      sparse: true // Allow null values
     }
   },
 
@@ -304,65 +314,72 @@ const userSchema = new mongoose.Schema({
     }
   },
 
-  // Security
+  // Security - FIXED: Proper IP address schema
   security: {
     last_ip_address: String,
-    ip_addresses: [{
-      ip: String,
-      timestamp: Date
-    }]
+    ip_addresses: [ipAddressSchema], // Use the fixed schema
+    failed_login_attempts: {
+      type: Number,
+      default: 0
+    },
+    last_failed_login: Date,
+    account_locked_until: Date
   },
 
-  // Flags
+  // Flags - FIXED: Removed unique constraints
   flags: {
     is_active: {
       type: Boolean,
-      default: true,
-      unique: true
+      default: true
     },
     is_banned: {
       type: Boolean,
-      default: false,
-      unique: true
+      default: false
     },
     is_verified: {
+      type: Boolean,
+      default: true
+    },
+    email_verified: {
       type: Boolean,
       default: true
     }
   },
 
-  // Referral
+  // Referral System
   referral: referralSchema,
 
   // Transaction History
   credit_transactions: [creditTransactionSchema],
+
+  // Usage Logs
   usage_logs: [usageLogSchema],
 
   // Timestamps
   timestamps: {
     created_at: {
       type: Date,
-      default: Date.now,
-      immutable: true
-    },
-    updated_at: {
-      type: Date,
       default: Date.now
     },
-    last_login: {
+    updated_at: {
       type: Date,
       default: Date.now
     },
     last_activity: {
       type: Date,
       default: Date.now
+    },
+    last_login: {
+      type: Date,
+      default: Date.now
     }
   }
 }, {
-  timestamps: { createdAt: 'timestamps.created_at', updatedAt: 'timestamps.updated_at' },
+  timestamps: false, // We manage timestamps manually
   collection: 'users'
 });
 
+// ============================================
 // VIRTUAL FIELDS
 // ============================================
 
@@ -427,7 +444,6 @@ userSchema.methods.deductCredits = async function(amount, description = '', meta
 };
 
 // Check if user can generate summary
-
 userSchema.methods.canGenerateSummary = function(videoDuration = 0) {
   // Check account status first
   if (this.flags.is_banned) {
@@ -539,8 +555,6 @@ userSchema.methods.resetMonthlyCredits = async function() {
   }
 };
 
-// Upgrade subscription
-
 // Upgrade or downgrade subscription
 userSchema.methods.upgradeSubscription = async function(plan, billingCycle, stripeData = {}) {
   const previousPlan = this.subscription.plan;
@@ -645,29 +659,12 @@ userSchema.methods.cancelSubscription = async function() {
   };
 };
 
-// Update features
-userSchema.methods.updateFeatureAccess = function() {
-  const plan = this.subscription.plan;
-  
-  if (plan === 'free') {
-    Object.keys(this.features.toObject()).forEach(feature => {
-      this.features[feature] = false;
-    });
-  } else if (plan === 'pro') {
-    this.features.unlimited_summaries = true;
-    this.features.unlimited_video_length = true;
-    this.features.premium_ai_models = true;
-    this.features.export_summaries = true;
-    this.features.priority_support = true;
-  }
-};
-
-// Generate referral code
+// Generate referral code - FIXED: Prevent parallel save errors
 userSchema.methods.generateReferralCode = async function() {
   if (!this.referral.code) {
     const code = `REF${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
     this.referral.code = code;
-    await this.save();
+    // Don't save here - let the caller handle saving
   }
   return this.referral.code;
 };
@@ -680,6 +677,17 @@ userSchema.pre('save', function(next) {
   this.timestamps.updated_at = new Date();
   next();
 });
+
+// ============================================
+// INDEXES FOR PERFORMANCE
+// ============================================
+
+userSchema.index({ email: 1 });
+userSchema.index({ googleId: 1 });
+userSchema.index({ 'subscription.plan': 1 });
+userSchema.index({ 'subscription.stripe_customer_id': 1 });
+userSchema.index({ 'referral.code': 1 });
+userSchema.index({ 'timestamps.created_at': -1 });
 
 // ============================================
 // MODEL EXPORT

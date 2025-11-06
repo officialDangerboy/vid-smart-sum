@@ -93,56 +93,96 @@ const optionalAuth = async (req, res, next) => {
 };
 
 /**
- * IP Tracking Middleware
+ * IP Tracking Middleware - FIXED VERSION
  * Tracks user's IP addresses for security purposes
+ * Prevents ParallelSaveError by queuing saves
  */
 const trackIP = async (req, res, next) => {
-  try {
-    if (req.user) {
-      // Extract IP from headers (handles proxies, load balancers, etc.)
-      const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
-                 req.headers['x-real-ip'] || 
-                 req.connection?.remoteAddress || 
-                 req.socket?.remoteAddress ||
-                 req.ip;
+  // Continue the request immediately
+  next();
+  
+  // Handle IP tracking asynchronously without blocking
+  if (req.user) {
+    setImmediate(async () => {
+      try {
+        // Extract IP from headers (handles proxies, load balancers, etc.)
+        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
+                   req.headers['x-real-ip'] || 
+                   req.connection?.remoteAddress || 
+                   req.socket?.remoteAddress ||
+                   req.ip;
 
-      if (ip) {
-        // Initialize security object if it doesn't exist
-        if (!req.user.security) {
-          req.user.security = {
-            ip_addresses: [],
-            last_ip: null,
-            failed_login_attempts: 0,
-            last_failed_login: null,
-            account_locked_until: null
-          };
+        if (ip) {
+          // Fetch fresh user to avoid stale data
+          const user = await User.findById(req.user._id);
+          
+          if (!user) return;
+
+          // Initialize security object if it doesn't exist
+          if (!user.security) {
+            user.security = {
+              ip_addresses: [],
+              last_ip_address: null
+            };
+          }
+
+          // Initialize ip_addresses array if it doesn't exist
+          if (!Array.isArray(user.security.ip_addresses)) {
+            user.security.ip_addresses = [];
+          }
+
+          // Check if IP is already tracked
+          const ipExists = user.security.ip_addresses.some(entry => entry.ip === ip);
+
+          if (!ipExists) {
+            // Add new IP address with timestamp
+            user.security.ip_addresses.push({
+              ip: ip,
+              timestamp: new Date()
+            });
+            
+            // Keep only last 50 IP addresses
+            if (user.security.ip_addresses.length > 50) {
+              user.security.ip_addresses = user.security.ip_addresses.slice(-50);
+            }
+            
+            console.log(`🔒 New IP tracked for user ${user.email}: ${ip}`);
+          }
+
+          // Update last IP address
+          user.security.last_ip_address = ip;
+
+          // Save with retry logic to handle potential conflicts
+          let retries = 3;
+          while (retries > 0) {
+            try {
+              await user.save();
+              break; // Success, exit retry loop
+            } catch (saveError) {
+              if (saveError.name === 'VersionError' || saveError.message.includes('ParallelSaveError')) {
+                retries--;
+                if (retries > 0) {
+                  // Wait a bit before retrying
+                  await new Promise(resolve => setTimeout(resolve, 100));
+                  // Fetch fresh user data
+                  const freshUser = await User.findById(user._id);
+                  if (freshUser) {
+                    user.security = freshUser.security;
+                  }
+                } else {
+                  throw saveError;
+                }
+              } else {
+                throw saveError;
+              }
+            }
+          }
         }
-
-        // Initialize ip_addresses array if it doesn't exist
-        if (!req.user.security.ip_addresses) {
-          req.user.security.ip_addresses = [];
-        }
-
-        // Add new IP if not already tracked
-        if (!req.user.security.ip_addresses.includes(ip)) {
-          req.user.security.ip_addresses.push(ip);
-          console.log(`🔒 New IP tracked for user ${req.user.email}: ${ip}`);
-        }
-
-        // Update last IP
-        req.user.security.last_ip = ip;
-
-        // Save user (don't await to avoid blocking the request)
-        req.user.save().catch(err => {
-          console.error('Error saving IP tracking:', err);
-        });
+      } catch (error) {
+        // Log error but don't throw - IP tracking is not critical
+        console.error('IP tracking error:', error.message);
       }
-    }
-    next();
-  } catch (error) {
-    console.error('IP tracking error:', error);
-    // Continue even if tracking fails - don't block the request
-    next();
+    });
   }
 };
 
