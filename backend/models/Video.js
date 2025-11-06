@@ -7,7 +7,7 @@ const videoSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
-    index: true
+    unique: true
   },
   video_url: {
     type: String,
@@ -57,14 +57,14 @@ const videoSchema = new mongoose.Schema({
       type: String,
       enum: ['openai', 'anthropic', 'google'],
       required: true,
-      index: true
+      unique: true
     },
     model: String,
     length: {
       type: String,
       enum: ['short', 'medium', 'long'],
       default: 'medium',
-      index: true
+      unique: true
     },
     language: {
       type: String,
@@ -89,7 +89,7 @@ const videoSchema = new mongoose.Schema({
     generated_at: {
       type: Date,
       default: Date.now,
-      index: true
+      unique: true
     },
     processing_time: Number,
     tokens_used: Number,
@@ -127,7 +127,7 @@ const videoSchema = new mongoose.Schema({
     last_accessed: {
       type: Date,
       default: Date.now,
-      index: true
+      unique: true
     },
     first_accessed: {
       type: Date,
@@ -186,14 +186,14 @@ const videoSchema = new mongoose.Schema({
       sixMonths.setMonth(sixMonths.getMonth() + 6);
       return sixMonths;
     },
-    index: true
+    unique: true
   },
   
   // Flags
   is_popular: {
     type: Boolean,
     default: false,
-    index: true
+    unique: true
   },
   is_flagged: {
     type: Boolean,
@@ -206,15 +206,6 @@ const videoSchema = new mongoose.Schema({
 // ============================================
 // INDEXES
 // ============================================
-videoSchema.index({ video_id: 1 });
-videoSchema.index({ 'stats.last_accessed': -1 });
-videoSchema.index({ cache_expires_at: 1 });
-videoSchema.index({ 'summaries.ai_provider': 1, 'summaries.length': 1 });
-videoSchema.index({ 'stats.cache_hits': -1 });
-videoSchema.index({ is_popular: 1, 'stats.total_views': -1 });
-
-// Compound indexes for efficient queries
-videoSchema.index({ video_id: 1, 'summaries.ai_provider': 1, 'summaries.length': 1 });
 
 // ============================================
 // VIRTUAL FIELDS
