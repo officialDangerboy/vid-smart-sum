@@ -1,4 +1,3 @@
-// pages/OAuthCallback.jsx - FINAL FIXED VERSION
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react';
@@ -15,31 +14,39 @@ const OAuthCallback = () => {
   const handleCallback = () => {
     const success = searchParams.get('success');
     const error = searchParams.get('error');
+    const accessToken = searchParams.get('accessToken');
+    const refreshToken = searchParams.get('refreshToken');
 
     console.log('\n🎯 ========================================');
     console.log('   OAUTH CALLBACK');
     console.log('   ========================================');
     console.log('Success:', success);
     console.log('Error:', error);
-    console.log('Cookies:', document.cookie);
+    console.log('Has accessToken:', !!accessToken);
+    console.log('Has refreshToken:', !!refreshToken);
     console.log('   ========================================\n');
 
-    if (success === 'true') {
-      console.log('✅ SUCCESS DETECTED');
+    if (success === 'true' && accessToken && refreshToken) {
+      console.log('✅ SUCCESS WITH TOKENS');
       setStatus('success');
       setMessage('Login successful!');
 
-      // ALWAYS notify parent via localStorage (most reliable)
-      console.log('📦 Storing success in localStorage');
+      // Store tokens in localStorage
+      console.log('💾 Storing tokens in localStorage');
+      localStorage.setItem('accessToken', accessToken);
+      localStorage.setItem('refreshToken', refreshToken);
+
+      // Notify parent window
+      console.log('📦 Storing success in localStorage for parent');
       localStorage.setItem('oauth_success', JSON.stringify({
         success: true,
         timestamp: Date.now(),
-        cookies: document.cookie
+        hasTokens: true
       }));
 
-      // Also try postMessage as backup
+      // Also try postMessage
       if (window.opener && !window.opener.closed) {
-        console.log('📤 Also sending via postMessage');
+        console.log('📤 Sending via postMessage');
         try {
           window.opener.postMessage({
             type: 'OAUTH_RESPONSE',
@@ -51,12 +58,12 @@ const OAuthCallback = () => {
         }
       }
 
-      // Try to close popup
-      console.log('🚪 Attempting to close window');
+      // Close popup
+      console.log('🚪 Closing window in 1 second');
       setTimeout(() => {
         window.close();
         
-        // If window doesn't close, show message
+        // Fallback UI if can't close
         setTimeout(() => {
           if (!window.closed) {
             console.log('⚠️ Could not close automatically');
@@ -65,17 +72,11 @@ const OAuthCallback = () => {
                 <div style="max-width:500px;">
                   <div style="font-size:5rem;margin-bottom:1.5rem;">✅</div>
                   <h1 style="font-size:2.5rem;color:#22c55e;margin-bottom:1rem;font-weight:bold;">Login Successful!</h1>
-                  <p style="font-size:1.3rem;color:#a1a1aa;margin-bottom:2rem;">You're all set!</p>
+                  <p style="font-size:1.3rem;color:#a1a1aa;margin-bottom:2rem;">Authentication complete!</p>
                   <p style="font-size:1rem;color:#71717a;margin-bottom:2rem;">Please close this window to continue</p>
                   <button onclick="window.close()" style="padding:1rem 2.5rem;font-size:1.1rem;background:#22c55e;color:#fff;border:none;border-radius:12px;cursor:pointer;font-weight:600;box-shadow:0 4px 12px rgba(34,197,94,0.3);">
                     Close Window
                   </button>
-                  <div style="margin-top:3rem;padding:1rem;background:#1a1a1a;border-radius:8px;border:1px solid #333;">
-                    <div style="font-size:0.8rem;color:#71717a;margin-bottom:0.5rem;">Debug Info:</div>
-                    <div style="font-family:monospace;font-size:0.7rem;color:#22c55e;word-break:break-all;">
-                      ${document.cookie || 'No cookies'}
-                    </div>
-                  </div>
                 </div>
               </div>
             `;
@@ -83,7 +84,7 @@ const OAuthCallback = () => {
         }, 200);
       }, 1000);
       
-      return; // Stop execution
+      return;
     }
 
     if (error) {
@@ -112,9 +113,9 @@ const OAuthCallback = () => {
       return;
     }
 
-    console.warn('⚠️ INVALID CALLBACK');
+    console.warn('⚠️ INVALID CALLBACK - Missing tokens');
     setStatus('error');
-    setMessage('Invalid callback');
+    setMessage('Authentication failed - no tokens received');
   };
 
   return (

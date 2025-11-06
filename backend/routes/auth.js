@@ -165,12 +165,16 @@ router.get('/google/callback',
       // Store refresh token securely
       await storeRefreshToken(req.user, refreshToken);
 
-      // Set HTTP-only cookies
-      res.cookie('accessToken', accessToken, getCookieOptions(15 * 60 * 1000));
-      res.cookie('refreshToken', refreshToken, getCookieOptions(REFRESH_TOKEN_EXPIRY_MS));
-
-      // Redirect to frontend success page
-      res.redirect(`${process.env.FRONTEND_URL}/auth/callback?success=true`);
+      // DON'T set cookies - send tokens in URL instead
+      // (cookies don't work cross-domain on Vercel)
+      
+      // Redirect with tokens in URL
+      const redirectUrl = new URL(`${process.env.FRONTEND_URL}/auth/callback`);
+      redirectUrl.searchParams.set('success', 'true');
+      redirectUrl.searchParams.set('accessToken', accessToken);
+      redirectUrl.searchParams.set('refreshToken', refreshToken);
+      
+      res.redirect(redirectUrl.toString());
 
     } catch (error) {
       console.error('OAuth callback error:', error);
@@ -322,7 +326,12 @@ router.post('/revoke-all-sessions', async (req, res) => {
  */
 router.get('/user', async (req, res) => {
   try {
-    const { accessToken } = req.cookies;
+    // Try header first (for localStorage tokens), then cookies (for local dev)
+    let accessToken = req.headers.authorization?.replace('Bearer ', '');
+    
+    if (!accessToken) {
+      accessToken = req.cookies.accessToken;
+    }
 
     if (!accessToken) {
       return res.status(401).json({

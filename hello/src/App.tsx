@@ -29,7 +29,7 @@ const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+  const API_URL = import.meta.env.VITE_API_URL || "https://vid-smart-sum.vercel.app";
 
   useEffect(() => {
     checkAuthStatus();
@@ -38,8 +38,23 @@ const AuthProvider = ({ children }) => {
   const checkAuthStatus = async () => {
     try {
       console.log('🔍 Checking authentication status...');
+
+      // Get token from localStorage
+      const accessToken = localStorage.getItem('accessToken');
+
+      if (!accessToken) {
+        console.log('❌ No access token found');
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+
       const response = await fetch(`${API_URL}/auth/user`, {
-        credentials: 'include'
+        credentials: 'include',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
       });
 
       if (response.ok) {
@@ -48,6 +63,8 @@ const AuthProvider = ({ children }) => {
         setUser(data.user);
       } else {
         console.log('❌ Not authenticated');
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
         setUser(null);
       }
     } catch (error) {
@@ -64,6 +81,10 @@ const AuthProvider = ({ children }) => {
         method: 'POST',
         credentials: 'include'
       });
+
+      // Clear localStorage tokens
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
       setUser(null);
     } catch (error) {
       console.error('Logout failed:', error);
@@ -131,7 +152,7 @@ const App = () => (
           <Routes>
             {/* Public Routes */}
             <Route path="/" element={<Index />} />
-            
+
             {/* Auth Routes - Redirect to dashboard if already logged in */}
             <Route
               path="/login"
@@ -142,10 +163,10 @@ const App = () => (
                 </PublicRoute>
               }
             />
-            
+
             {/* OAuth Callback Route - No auth required, handles popup communication */}
             <Route path="/auth/callback" element={<OAuthCallback />} />
-            
+
             {/* Protected Routes - Require authentication */}
             <Route
               path="/dashboard"
@@ -156,7 +177,7 @@ const App = () => (
                 </ProtectedRoute>
               }
             />
-            
+
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

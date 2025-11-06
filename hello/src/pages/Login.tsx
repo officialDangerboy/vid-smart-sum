@@ -13,7 +13,7 @@ const Login = () => {
   const { toast } = useToast();
   const { refreshAuth } = useAuth();
 
-  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+  const API_URL = import.meta.env.VITE_API_URL || "https://vid-smart-sum.vercel.app";
 
   useEffect(() => {
     const handleMessage = async (event) => {

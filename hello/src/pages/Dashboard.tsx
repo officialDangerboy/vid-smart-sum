@@ -29,7 +29,7 @@ const Dashboard = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
-  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+  const API_URL = import.meta.env.VITE_API_URL || "https://vid-smart-sum.vercel.app";
 
   const getApiUrl = (path) => {
     return import.meta.env.DEV ? path : `${API_URL}${path}`;
