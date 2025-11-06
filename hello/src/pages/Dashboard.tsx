@@ -1016,28 +1016,6 @@ const Dashboard = () => {
                   </div>
                 </div>
               )}
-
-              {/* RESPONSIVE Stats Grid */}
-              <div className="grid grid-cols-3 gap-2 sm:gap-4 pt-3 sm:pt-4 border-t">
-                {!isPro && (
-                  <>
-                    <div className="text-center">
-                      <p className="text-xl sm:text-2xl font-bold text-green-600">
-                        +{getNextReferralReward()}
-                      </p>
-                      <p className="text-[10px] sm:text-xs text-muted-foreground">You earn next</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-xl sm:text-2xl font-bold text-primary">+5</p>
-                      <p className="text-[10px] sm:text-xs text-muted-foreground">They get</p>
-                    </div>
-                  </>
-                )}
-                <div className={`text-center ${isPro ? 'col-span-3' : ''}`}>
-                  <p className="text-xl sm:text-2xl font-bold">{userData.referral?.total_referrals || 0}</p>
-                  <p className="text-[10px] sm:text-xs text-muted-foreground">Total referred</p>
-                </div>
-              </div>
             </div>
           </CardContent>
         </Card>
