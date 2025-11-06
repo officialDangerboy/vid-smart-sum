@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Play, Youtube, Sparkles, Zap, Clock, FileText, Brain, Target, Pause, Volume2, VolumeX } from "lucide-react";
 import { IoExtensionPuzzleOutline } from "react-icons/io5";
 import { useState, useRef } from "react";
+import introVideo from '../assets/intro.mp4';
 
 const Hero = () => {
   const [isPlaying, setIsPlaying] = useState(true);
@@ -113,7 +114,7 @@ const Hero = () => {
                 className="w-full h-auto"
                 aria-label="YouTube AI Summarizer product demonstration video"
               >
-                <source src="src/assets/intro.mp4" type="video/mp4" />
+                <source src={introVideo} type="video/mp4" />
                 Your browser does not support the video tag.
               </video>
               
