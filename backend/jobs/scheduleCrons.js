@@ -6,7 +6,7 @@ const {
   generateWeeklyAnalytics,
   checkExpiredSubscriptions,
   cleanupOldLogs
-} = require('./cronJobs_UPDATED');
+} = require('./cronJobs');
 
 // Error logging helper
 function logCronError(jobName, error) {

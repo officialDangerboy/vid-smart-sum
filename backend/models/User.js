@@ -87,12 +87,12 @@ const userSchema = new mongoose.Schema({
   googleId: {
     type: String,
     required: true,
-    unique: true
+    index: true
   },
   email: {
     type: String,
     required: true,
-    unique: true,
+    index: true,
     lowercase: true,
     trim: true
   },
@@ -709,11 +709,14 @@ userSchema.pre('save', function(next) {
 // INDEXES
 // ============================================
 
-userSchema.index({ email: 1 });
-userSchema.index({ googleId: 1 });
-userSchema.index({ 'subscription.plan': 1 });
-userSchema.index({ 'subscription.stripe_customer_id': 1 });
+// Only keep unique indexes here (fields already have index: true in schema)
+userSchema.index({ email: 1 }, { unique: true });
+userSchema.index({ googleId: 1 }, { unique: true });
+userSchema.index({ 'subscription.stripe_customer_id': 1 }, { unique: true, sparse: true });
 userSchema.index({ 'referral.code': 1 }, { unique: true, sparse: true });
+
+// Regular indexes
+userSchema.index({ 'subscription.plan': 1 });
 userSchema.index({ 'timestamps.created_at': -1 });
 
 // ============================================
