@@ -51,7 +51,6 @@ async function storeTranscript(transcriptData) {
     } = transcriptData;
 
     const word_count = full_text ? full_text.trim().split(/\s+/).length : 0;
-    access_count: supabase.raw('access_count + 1')
 
     console.log(`💾 Storing transcript in Supabase: ${video_id}`);
 
@@ -69,7 +68,7 @@ async function storeTranscript(transcriptData) {
         source,
         generated_at: new Date().toISOString(),
         last_accessed: new Date().toISOString(),
-        access_count: 1
+        access_count: 1  // ✅ Fixed
       }, { onConflict: 'video_id' })
       .select()
       .single();
@@ -90,11 +89,19 @@ async function storeTranscript(transcriptData) {
  */
 async function updateTranscriptAccess(videoId) {
   try {
+    // First get current count
+    const { data: current } = await supabase
+      .from('video_transcripts')
+      .select('access_count')
+      .eq('video_id', videoId)
+      .single();
+    
+    // Then update
     const { error } = await supabase
       .from('video_transcripts')
       .update({
         last_accessed: new Date().toISOString(),
-        access_count: supabase.raw('access_count + 1')
+        access_count: (current?.access_count || 0) + 1
       })
       .eq('video_id', videoId);
     
