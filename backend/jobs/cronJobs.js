@@ -1,316 +1,378 @@
 const User = require('../models/User');
+const Video = require('../models/Video');
 
-// ============================================
-// ⭐ MONTHLY CREDIT RESET (1st of each month)
-// ============================================
-
-async function resetMonthlyCredits() {
-  console.log('\n📅 [CRON] Running monthly credit reset...');
-  
+// Reset daily usage counters for all users (runs at midnight)
+async function resetDailyUsage() {
   try {
+    console.log('🔄 Starting daily usage reset...');
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+
+    const result = await User.updateMany(
+      { 'flags.is_active': true },
+      {
+        $set: {
+          'usage.summaries_today': 0,
+          'usage.daily_reset_at': tomorrow
+        }
+      }
+    );
+
+    console.log(`✅ Daily usage reset for ${result.modifiedCount} users`);
+    return result.modifiedCount;
+  } catch (error) {
+    console.error('❌ Daily reset error:', error);
+    throw error;
+  }
+}
+
+// Reset monthly credits for free users (runs daily, checks if needed)
+async function resetMonthlyCredits() {
+  try {
+    console.log('🔄 Checking for monthly credit resets...');
+
     const now = new Date();
-    
-    // Find all free users whose next reset date has passed
-    const freeUsers = await User.find({
+
+    // Find FREE users whose credits need reset
+    const users = await User.find({
       'subscription.plan': 'free',
       'flags.is_active': true,
       'credits.next_reset_at': { $lte: now }
     });
-    
-    console.log(`Found ${freeUsers.length} users due for monthly reset`);
-    
-    let successCount = 0;
+
+    console.log(`📋 Found ${users.length} users needing credit reset`);
+
+    let resetCount = 0;
     let errorCount = 0;
-    
-    for (const user of freeUsers) {
+
+    for (const user of users) {
       try {
         await user.resetMonthlyCredits();
-        successCount++;
+        console.log(`✅ Reset credits for: ${user.email} (${user.credits.balance} credits)`);
+        resetCount++;
       } catch (error) {
-        console.error(`Failed to reset credits for ${user.email}:`, error.message);
+        console.error(`❌ Error resetting credits for ${user.email}:`, error.message);
         errorCount++;
       }
     }
-    
-    console.log(`✅ Monthly reset complete: ${successCount} success, ${errorCount} errors`);
-    
-    return {
-      success: true,
-      usersReset: successCount,
-      errors: errorCount
-    };
-    
+
+    console.log(`✅ Monthly credits reset: ${resetCount} success, ${errorCount} errors`);
+    return { resetCount, errorCount };
   } catch (error) {
-    console.error('❌ Monthly credit reset failed:', error);
+    console.error('❌ Monthly credit reset error:', error);
     throw error;
   }
 }
 
-// ============================================
-// ⭐ WEEKLY USAGE RESET
-// ============================================
-
-async function resetWeeklyUsage() {
-  console.log('\n📊 [CRON] Running weekly usage reset...');
-  
+// Clean up expired video cache (runs weekly)
+async function cleanupExpiredCache() {
   try {
-    const now = new Date();
-    
-    // Find all users whose week reset date has passed
-    const users = await User.find({
-      'flags.is_active': true,
-      'usage.week_reset_at': { $lte: now }
-    });
-    
-    console.log(`Found ${users.length} users due for weekly reset`);
-    
-    let successCount = 0;
-    
-    for (const user of users) {
-      try {
-        await user.resetWeeklyUsage();
-        successCount++;
-      } catch (error) {
-        console.error(`Failed to reset weekly usage for ${user.email}:`, error.message);
-      }
-    }
-    
-    console.log(`✅ Weekly usage reset complete: ${successCount} users updated`);
-    
-    return {
-      success: true,
-      usersReset: successCount
-    };
-    
+    console.log('🔄 Starting cache cleanup...');
+
+    const deleted = await Video.cleanupExpiredCache();
+    console.log(`✅ Cleaned up ${deleted} expired cache entries`);
+    return deleted;
   } catch (error) {
-    console.error('❌ Weekly usage reset failed:', error);
+    console.error('❌ Cache cleanup error:', error);
     throw error;
   }
 }
 
-// ============================================
-// LOW CREDIT NOTIFICATIONS
-// ============================================
-
+// Notify users with low credits (< 10, only free users)
 async function notifyLowCreditUsers() {
-  console.log('\n🔔 [CRON] Checking for low credit users...');
-  
   try {
-    // Find free users with 5 or fewer credits
+    console.log('🔄 Checking for low credit users...');
+
     const lowCreditUsers = await User.find({
       'subscription.plan': 'free',
       'flags.is_active': true,
-      'credits.balance': { $lte: 5, $gt: 0 },
+      'credits.balance': { $lte: 10, $gt: 0 },
       'preferences.notifications.email.credit_low': true
-    });
-    
-    console.log(`Found ${lowCreditUsers.length} users with low credits`);
-    
-    // TODO: Send email notifications
-    // for (const user of lowCreditUsers) {
-    //   await sendLowCreditEmail(user);
-    // }
-    
-    return {
-      success: true,
-      usersNotified: lowCreditUsers.length
-    };
-    
+    }).select('email name credits.balance credits.next_reset_at');
+
+    console.log(`📧 Found ${lowCreditUsers.length} users with low credits`);
+
+    // TODO: Integrate email service (SendGrid, Mailgun, Resend, etc.)
+    for (const user of lowCreditUsers) {
+      console.log(`Would send email to ${user.email} - ${user.credits.balance} credits remaining`);
+      // Example:
+      // await sendLowCreditEmail({
+      //   to: user.email,
+      //   name: user.name,
+      //   creditsRemaining: user.credits.balance,
+      //   nextReset: user.credits.next_reset_at
+      // });
+    }
+
+    return lowCreditUsers.length;
   } catch (error) {
-    console.error('❌ Low credit notification failed:', error);
+    console.error('❌ Low credit notification error:', error);
     throw error;
   }
 }
 
-// ============================================
-// WEEKLY ANALYTICS
-// ============================================
-
+// Generate weekly analytics (runs every Monday)
 async function generateWeeklyAnalytics() {
-  console.log('\n📈 [CRON] Generating weekly analytics...');
-  
   try {
+    console.log('🔄 Generating weekly analytics...');
+
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-    
-    // Calculate stats
-    const totalUsers = await User.countDocuments({ 'flags.is_active': true });
-    const newUsers = await User.countDocuments({
-      'timestamps.created_at': { $gte: oneWeekAgo }
-    });
-    
-    const freeUsers = await User.countDocuments({ 
-      'subscription.plan': 'free',
-      'flags.is_active': true 
-    });
-    
-    const proUsers = await User.countDocuments({ 
-      'subscription.plan': 'pro',
-      'flags.is_active': true 
-    });
-    
-    // Calculate total summaries this week
-    const users = await User.find({ 'flags.is_active': true });
-    let totalSummariesThisWeek = 0;
-    
-    for (const user of users) {
-      totalSummariesThisWeek += user.usage?.summaries_this_week || 0;
-    }
-    
-    const analytics = {
-      week_ending: new Date(),
-      total_users: totalUsers,
-      new_users: newUsers,
-      free_users: freeUsers,
-      pro_users: proUsers,
-      total_summaries_this_week: totalSummariesThisWeek
+
+    const [
+      totalActiveUsers,
+      newSignups,
+      freeUsers,
+      proUsers,
+      summaryStats,
+      cacheStats
+    ] = await Promise.all([
+      // Active users this week
+      User.countDocuments({
+        'flags.is_active': true,
+        'timestamps.last_activity': { $gte: oneWeekAgo }
+      }),
+
+      // New signups
+      User.countDocuments({
+        'timestamps.created_at': { $gte: oneWeekAgo }
+      }),
+
+      // Free users count
+      User.countDocuments({
+        'subscription.plan': 'free',
+        'flags.is_active': true
+      }),
+
+      // Pro users count
+      User.countDocuments({
+        'subscription.plan': 'pro',
+        'subscription.status': 'active'
+      }),
+
+      // Summary statistics
+      User.aggregate([
+        {
+          $match: {
+            'usage.last_summary_at': { $gte: oneWeekAgo },
+            'flags.is_active': true
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            total_summaries: { $sum: '$usage.summaries_this_week' },
+            total_videos: { $sum: '$usage.total_videos_watched' },
+            total_time_saved: { $sum: '$usage.total_time_saved' }
+          }
+        }
+      ]),
+
+      // Cache hit statistics
+      Video.aggregate([
+        {
+          $match: {
+            'stats.last_accessed': { $gte: oneWeekAgo }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            total_cache_hits: { $sum: '$stats.cache_hit_count' },
+            unique_videos: { $sum: 1 }
+          }
+        }
+      ])
+    ]);
+
+    const stats = {
+      period: 'week',
+      generated_at: new Date(),
+      users: {
+        total_active: totalActiveUsers,
+        new_signups: newSignups,
+        free_users: freeUsers,
+        pro_users: proUsers
+      },
+      summaries: {
+        total: summaryStats[0]?.total_summaries || 0,
+        unique_videos: cacheStats[0]?.unique_videos || 0,
+        cache_hits: cacheStats[0]?.total_cache_hits || 0,
+        videos_watched: summaryStats[0]?.total_videos || 0,
+        time_saved_hours: Math.round((summaryStats[0]?.total_time_saved || 0) / 60)
+      }
     };
-    
-    console.log('📊 Weekly Analytics:', analytics);
-    
-    // TODO: Save to analytics collection or send to admin
-    
-    return {
-      success: true,
-      analytics
-    };
-    
+
+    console.log('📊 Weekly Analytics:', JSON.stringify(stats, null, 2));
+
+    // TODO: Store in analytics collection or send to admin dashboard
+    // await Analytics.create(stats);
+
+    return stats;
   } catch (error) {
-    console.error('❌ Weekly analytics generation failed:', error);
+    console.error('❌ Analytics generation error:', error);
     throw error;
   }
 }
 
-// ============================================
-// EXPIRED SUBSCRIPTIONS CHECK
-// ============================================
-
+// Check for expired subscriptions (runs daily)
 async function checkExpiredSubscriptions() {
-  console.log('\n⏰ [CRON] Checking for expired subscriptions...');
-  
   try {
+    console.log('🔄 Checking for expired subscriptions...');
+
     const now = new Date();
-    
-    // Find Pro users whose subscription has ended
-    const expiredUsers = await User.find({
+
+    const expiredSubs = await User.find({
       'subscription.plan': 'pro',
-      'subscription.current_period_end': { $lte: now },
-      'subscription.cancel_at_period_end': true
+      'subscription.status': 'active',
+      'subscription.cancel_at_period_end': true,
+      'subscription.current_period_end': { $lte: now }
     });
-    
-    console.log(`Found ${expiredUsers.length} expired subscriptions`);
-    
+
+    console.log(`Found ${expiredSubs.length} expired subscriptions`);
+
     let downgradeCount = 0;
-    
-    for (const user of expiredUsers) {
+
+    for (const user of expiredSubs) {
       try {
         // Downgrade to free
         user.subscription.plan = 'free';
         user.subscription.status = 'expired';
-        user.subscription.cancel_at_period_end = false;
-        
-        // Update features
+        user.subscription.billing_cycle = null;
+
+        // Reset features
         user.updateFeatureAccess();
-        
-        // Reset credits to monthly allocation
-        user.credits.balance = user.credits.monthly_allocation;
-        
+
+        // Add transaction log
+        user.credit_transactions.push({
+          type: 'admin_adjustment',
+          amount: 0,
+          balance_after: user.credits.balance,
+          description: 'Subscription expired - downgraded to free plan'
+        });
+
         await user.save();
-        
+
         console.log(`✅ Downgraded ${user.email} to free plan`);
         downgradeCount++;
-        
-        // TODO: Send email notification about downgrade
-        
+
+        // TODO: Send email notification
+        // await sendSubscriptionExpiredEmail(user);
+
       } catch (error) {
-        console.error(`Failed to downgrade ${user.email}:`, error.message);
+        console.error(`Error downgrading ${user.email}:`, error.message);
       }
     }
-    
-    console.log(`✅ Expired subscription check complete: ${downgradeCount} users downgraded`);
-    
-    return {
-      success: true,
-      usersDowngraded: downgradeCount
-    };
-    
+
+    console.log(`✅ Downgraded ${downgradeCount} expired subscriptions`);
+    return downgradeCount;
+
   } catch (error) {
-    console.error('❌ Expired subscription check failed:', error);
+    console.error('❌ Check expired subscriptions error:', error);
     throw error;
   }
 }
 
-// ============================================
-// CLEANUP OLD LOGS (Keep last 3 months)
-// ============================================
-
+// Clean up old usage logs (runs monthly, keeps last 3 months)
 async function cleanupOldLogs() {
-  console.log('\n🗑️  [CRON] Cleaning up old logs...');
-  
   try {
+    console.log('🔄 Cleaning up old logs...');
+
     const threeMonthsAgo = new Date();
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-    
-    // Clean up old credit transactions and usage logs
-    const users = await User.find({ 'flags.is_active': true });
-    
-    let cleanedCount = 0;
-    
-    for (const user of users) {
-      let modified = false;
-      
-      // Keep only transactions from last 3 months
-      if (user.credit_transactions && user.credit_transactions.length > 0) {
-        const oldLength = user.credit_transactions.length;
-        user.credit_transactions = user.credit_transactions.filter(
-          tx => tx.created_at >= threeMonthsAgo
-        );
-        
-        if (user.credit_transactions.length < oldLength) {
-          modified = true;
+
+    const result = await User.updateMany(
+      {},
+      {
+        $pull: {
+          usage_logs: {
+            timestamp: { $lt: threeMonthsAgo }
+          },
+          credit_transactions: {
+            created_at: { $lt: threeMonthsAgo }
+          }
         }
       }
-      
-      // Keep only usage logs from last 3 months
-      if (user.usage_logs && user.usage_logs.length > 0) {
-        const oldLength = user.usage_logs.length;
-        user.usage_logs = user.usage_logs.filter(
-          log => log.timestamp >= threeMonthsAgo
-        );
-        
-        if (user.usage_logs.length < oldLength) {
-          modified = true;
-        }
-      }
-      
-      if (modified) {
-        await user.save();
-        cleanedCount++;
-      }
-    }
-    
-    console.log(`✅ Log cleanup complete: ${cleanedCount} users cleaned`);
-    
-    return {
-      success: true,
-      usersCleaned: cleanedCount
-    };
-    
+    );
+
+    console.log(`✅ Cleaned up old logs from ${result.modifiedCount} users`);
+    return result.modifiedCount;
+
   } catch (error) {
-    console.error('❌ Log cleanup failed:', error);
+    console.error('❌ Log cleanup error:', error);
     throw error;
   }
 }
 
-// ============================================
-// EXPORTS
-// ============================================
+// Master function to run all cron jobs
+async function runAllCronJobs() {
+  console.log('🚀 Starting all cron jobs...\n');
+
+  const results = {
+    daily_reset: null,
+    monthly_credits: null,
+    cache_cleanup: null,
+    low_credit_notifications: null,
+    weekly_analytics: null,
+    expired_subscriptions: null,
+    old_logs_cleanup: null
+  };
+
+  try {
+    results.daily_reset = await resetDailyUsage();
+  } catch (error) {
+    console.error('Daily reset failed:', error);
+  }
+
+  try {
+    results.monthly_credits = await resetMonthlyCredits();
+  } catch (error) {
+    console.error('Monthly credits failed:', error);
+  }
+
+  try {
+    results.cache_cleanup = await cleanupExpiredCache();
+  } catch (error) {
+    console.error('Cache cleanup failed:', error);
+  }
+
+  try {
+    results.low_credit_notifications = await notifyLowCreditUsers();
+  } catch (error) {
+    console.error('Low credit notifications failed:', error);
+  }
+
+  try {
+    results.weekly_analytics = await generateWeeklyAnalytics();
+  } catch (error) {
+    console.error('Weekly analytics failed:', error);
+  }
+
+  try {
+    results.expired_subscriptions = await checkExpiredSubscriptions();
+  } catch (error) {
+    console.error('Expired subscriptions check failed:', error);
+  }
+
+  try {
+    results.old_logs_cleanup = await cleanupOldLogs();
+  } catch (error) {
+    console.error('Old logs cleanup failed:', error);
+  }
+
+  console.log('\n✅ All cron jobs completed:', results);
+  return results;
+}
 
 module.exports = {
+  resetDailyUsage,
   resetMonthlyCredits,
-  resetWeeklyUsage,
+  cleanupExpiredCache,
   notifyLowCreditUsers,
   generateWeeklyAnalytics,
   checkExpiredSubscriptions,
-  cleanupOldLogs
+  cleanupOldLogs,
+  runAllCronJobs
 };

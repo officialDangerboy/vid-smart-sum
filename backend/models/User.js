@@ -12,7 +12,7 @@ const creditTransactionSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['earned', 'spent', 'refund', 'bonus', 'purchase', 'expired', 'admin_adjustment', 'referral', 'monthly_reset'],
+    enum: ['earned', 'spent', 'refund', 'bonus', 'purchase', 'expired', 'admin_adjustment'],
     required: true
   },
   amount: {
@@ -27,8 +27,8 @@ const creditTransactionSchema = new mongoose.Schema({
   metadata: {
     video_id: String,
     video_title: String,
-    referral_user_id: String,
-    referral_user_email: String
+    cached: Boolean,
+    ai_provider: String
   },
   created_at: {
     type: Date,
@@ -36,17 +36,31 @@ const creditTransactionSchema = new mongoose.Schema({
   }
 }, { _id: true });
 
-// Lightweight usage log - only essential data
 const usageLogSchema = new mongoose.Schema({
   video_id: String,
+  video_title: String,
+  video_url: String,
+  video_duration: Number,
+  channel_name: String,
+  ai_provider: {
+    type: String,
+    enum: ['openai', 'anthropic', 'google']
+  },
+  model_used: String,
+  summary_length: {
+    type: String,
+    enum: ['short', 'medium', 'long']
+  },
   credits_used: {
     type: Number,
     default: 1
   },
+  processing_time: Number,
   success: {
     type: Boolean,
     default: true
   },
+  error_message: String,
   timestamp: {
     type: Date,
     default: Date.now
@@ -78,21 +92,33 @@ const referralSchema = new mongoose.Schema({
   }
 });
 
+// FIXED: IP Address schema without _id conflict
+const ipAddressSchema = new mongoose.Schema({
+  ip: {
+    type: String,
+    required: true
+  },
+  timestamp: {
+    type: Date,
+    default: Date.now
+  }
+}, { _id: false }); // IMPORTANT: Disable auto _id generation
+
 // ============================================
 // MAIN USER SCHEMA
 // ============================================
 
 const userSchema = new mongoose.Schema({
-  // Basic Info
+  // Basic Info - FIXED: Removed duplicate unique constraints
   googleId: {
     type: String,
     required: true,
-    index: true
+    unique: true
   },
   email: {
     type: String,
     required: true,
-    index: true,
+    unique: true,
     lowercase: true,
     trim: true
   },
@@ -103,16 +129,16 @@ const userSchema = new mongoose.Schema({
   },
   picture: String,
   
-  // ⭐ NEW CREDITS SYSTEM
+  // Credits System
   credits: {
     balance: {
       type: Number,
-      default: 20, // Changed from 100 to 20
+      default: 100,
       min: 0
     },
     monthly_allocation: {
       type: Number,
-      default: 20 // Changed from 100 to 20
+      default: 100
     },
     last_reset: {
       type: Date,
@@ -123,14 +149,12 @@ const userSchema = new mongoose.Schema({
       default: function() {
         const nextMonth = new Date();
         nextMonth.setMonth(nextMonth.getMonth() + 1);
-        nextMonth.setDate(1); // First day of next month
-        nextMonth.setHours(0, 0, 0, 0);
         return nextMonth;
       }
     },
     lifetime_earned: {
       type: Number,
-      default: 20 // Initial signup bonus
+      default: 100
     },
     lifetime_spent: {
       type: Number,
@@ -142,7 +166,7 @@ const userSchema = new mongoose.Schema({
     }
   },
 
-  // Subscription
+  // Subscription - FIXED: Removed unique constraints on enum fields
   subscription: {
     plan: {
       type: String,
@@ -173,17 +197,21 @@ const userSchema = new mongoose.Schema({
     stripe_customer_id: {
       type: String,
       unique: true,
-      sparse: true
+      sparse: true // Allow null values
     },
     stripe_subscription_id: {
       type: String,
       unique: true,
-      sparse: true
+      sparse: true // Allow null values
     }
   },
 
-  // ⭐ SIMPLIFIED USAGE TRACKING
+  // Usage Tracking
   usage: {
+    summaries_today: {
+      type: Number,
+      default: 0
+    },
     summaries_this_week: {
       type: Number,
       default: 0
@@ -196,24 +224,38 @@ const userSchema = new mongoose.Schema({
       type: Number,
       default: 0
     },
+    total_videos_watched: {
+      type: Number,
+      default: 0
+    },
+    total_time_saved: {
+      type: Number,
+      default: 0
+    },
     last_summary_at: Date,
     
-    // ⭐ ONLY ONE LIMIT NOW
     limits: {
+      daily_summaries: {
+        type: Number,
+        default: 30
+      },
+      monthly_summaries: {
+        type: Number,
+        default: 150
+      },
       video_duration_seconds: {
         type: Number,
-        default: 1200 // 20 minutes for free users
+        default: 1200 // 20 minutes
       }
     },
     
-    // Track weekly reset
-    week_reset_at: {
+    daily_reset_at: {
       type: Date,
       default: () => {
-        const nextWeek = new Date();
-        nextWeek.setDate(nextWeek.getDate() + 7);
-        nextWeek.setHours(0, 0, 0, 0);
-        return nextWeek;
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(0, 0, 0, 0);
+        return tomorrow;
       }
     }
   },
@@ -240,9 +282,9 @@ const userSchema = new mongoose.Schema({
           type: Boolean,
           default: true
         },
-        monthly_reset: {
+        weekly_digest: {
           type: Boolean,
-          default: true
+          default: false
         }
       }
     }
@@ -272,53 +314,69 @@ const userSchema = new mongoose.Schema({
     }
   },
 
-  // ⭐ ENHANCED REFERRAL SYSTEM
-  referral: referralSchema,
-
-  // Transaction history (keep last 100 for performance)
-  credit_transactions: [creditTransactionSchema],
-  
-  // Simplified usage logs (keep last 50)
-  usage_logs: [usageLogSchema],
-
-  // Timestamps
-  timestamps: {
-    created_at: {
-      type: Date,
-      default: Date.now,
-      immutable: true
+  // Security - FIXED: Proper IP address schema
+  security: {
+    last_ip_address: String,
+    ip_addresses: [ipAddressSchema], // Use the fixed schema
+    failed_login_attempts: {
+      type: Number,
+      default: 0
     },
-    updated_at: {
-      type: Date,
-      default: Date.now
-    },
-    last_login: {
-      type: Date,
-      default: Date.now
-    },
-    last_activity: {
-      type: Date,
-      default: Date.now
-    }
+    last_failed_login: Date,
+    account_locked_until: Date
   },
 
-  // Flags
+  // Flags - FIXED: Removed unique constraints
   flags: {
     is_active: {
-      type: Boolean,
-      default: true
-    },
-    email_verified: {
       type: Boolean,
       default: true
     },
     is_banned: {
       type: Boolean,
       default: false
+    },
+    is_verified: {
+      type: Boolean,
+      default: true
+    },
+    email_verified: {
+      type: Boolean,
+      default: true
+    }
+  },
+
+  // Referral System
+  referral: referralSchema,
+
+  // Transaction History
+  credit_transactions: [creditTransactionSchema],
+
+  // Usage Logs
+  usage_logs: [usageLogSchema],
+
+  // Timestamps
+  timestamps: {
+    created_at: {
+      type: Date,
+      default: Date.now
+    },
+    updated_at: {
+      type: Date,
+      default: Date.now
+    },
+    last_activity: {
+      type: Date,
+      default: Date.now
+    },
+    last_login: {
+      type: Date,
+      default: Date.now
     }
   }
 }, {
-  timestamps: { createdAt: 'timestamps.created_at', updatedAt: 'timestamps.updated_at' }
+  timestamps: false, // We manage timestamps manually
+  collection: 'users'
 });
 
 // ============================================
@@ -326,67 +384,46 @@ const userSchema = new mongoose.Schema({
 // ============================================
 
 userSchema.virtual('is_premium').get(function() {
-  return this.subscription?.plan === 'pro' && this.subscription?.status === 'active';
+  return this.subscription.plan === 'pro';
 });
 
-userSchema.virtual('credits_percentage').get(function() {
-  if (this.is_premium) return 100;
-  return Math.round((this.credits.balance / this.credits.monthly_allocation) * 100);
+userSchema.virtual('credit_percentage').get(function() {
+  if (this.subscription.plan !== 'free') return 100;
+  return (this.credits.balance / this.credits.monthly_allocation) * 100;
 });
 
 // ============================================
 // INSTANCE METHODS
 // ============================================
 
-// ⭐ SIMPLIFIED: Check if user can generate summary
-userSchema.methods.canGenerateSummary = function(videoDuration = 0) {
-  // Premium users - unlimited
-  if (this.is_premium) {
-    return {
-      allowed: true,
-      reason: 'Premium user - unlimited access',
-      is_premium: true
-    };
+// Add credits
+userSchema.methods.addCredits = async function(amount, type = 'earned', description = '', metadata = {}) {
+  this.credits.balance += amount;
+  this.credits.lifetime_earned += amount;
+  
+  if (type === 'earned') {
+    this.credits.referral_credits += amount;
   }
   
-  // === FREE USER CHECKS ===
+  this.credit_transactions.push({
+    type,
+    amount,
+    balance_after: this.credits.balance,
+    description,
+    metadata
+  });
   
-  // Check credits
-  if (this.credits.balance < 1) {
-    return {
-      allowed: false,
-      reason: 'Insufficient credits. You need at least 1 credit.',
-      credits_remaining: this.credits.balance,
-      next_reset: this.credits.next_reset_at
-    };
+  // Keep only last 500 transactions
+  if (this.credit_transactions.length > 500) {
+    this.credit_transactions = this.credit_transactions.slice(-500);
   }
   
-  // ⭐ ONLY CHECK: Video duration limit (20 minutes)
-  if (videoDuration > this.usage.limits.video_duration_seconds) {
-    const maxMinutes = Math.floor(this.usage.limits.video_duration_seconds / 60);
-    return {
-      allowed: false,
-      reason: `Video exceeds ${maxMinutes} minute limit for free users`,
-      video_duration_limit: maxMinutes,
-      video_duration_provided: Math.floor(videoDuration / 60)
-    };
-  }
-  
-  // All checks passed
-  return {
-    allowed: true,
-    reason: 'Access granted',
-    credits_remaining: this.credits.balance
-  };
+  await this.save();
+  return this.credits.balance;
 };
 
 // Deduct credits
-userSchema.methods.deductCredits = async function(amount, description, metadata = {}) {
-  if (this.is_premium) {
-    console.log('⭐ Premium user - no credits deducted');
-    return;
-  }
-  
+userSchema.methods.deductCredits = async function(amount, description = '', metadata = {}) {
   if (this.credits.balance < amount) {
     throw new Error('Insufficient credits');
   }
@@ -402,103 +439,90 @@ userSchema.methods.deductCredits = async function(amount, description, metadata 
     metadata
   });
   
-  // Keep only last 100 transactions
-  if (this.credit_transactions.length > 100) {
-    this.credit_transactions = this.credit_transactions.slice(-100);
-  }
-  
   await this.save();
-  
-  console.log(`💳 Deducted ${amount} credits from ${this.email}. Balance: ${this.credits.balance}`);
+  return this.credits.balance;
 };
 
-// Add credits
-userSchema.methods.addCredits = async function(amount, type, description, metadata = {}) {
-  this.credits.balance += amount;
-  this.credits.lifetime_earned += amount;
-  
-  this.credit_transactions.push({
-    type,
-    amount,
-    balance_after: this.credits.balance,
-    description,
-    metadata
-  });
-  
-  // Keep only last 100 transactions
-  if (this.credit_transactions.length > 100) {
-    this.credit_transactions = this.credit_transactions.slice(-100);
+// Check if user can generate summary
+userSchema.methods.canGenerateSummary = function(videoDuration = 0) {
+  // Check account status first
+  if (this.flags.is_banned) {
+    return { allowed: false, reason: 'Account is banned' };
   }
   
-  await this.save();
-  
-  console.log(`💰 Added ${amount} credits to ${this.email}. Balance: ${this.credits.balance}`);
-};
-
-// ⭐ NEW: Add referral credits with tiered rewards (10/7/5)
-userSchema.methods.addReferralCredits = async function(newUser) {
-  const referralCount = this.referral.total_referrals;
-  let creditsToGive = 5; // Default for 3rd+ referrals
-  
-  // ⭐ TIERED REWARDS
-  if (referralCount === 0) {
-    creditsToGive = 10; // First referral
-  } else if (referralCount === 1) {
-    creditsToGive = 7; // Second referral
+  if (!this.flags.is_active) {
+    return { allowed: false, reason: 'Account is inactive' };
   }
   
-  // Add credits
-  this.credits.balance += creditsToGive;
-  this.credits.referral_credits += creditsToGive;
-  this.credits.lifetime_earned += creditsToGive;
+  // Premium users - unlimited access, skip all checks
+  if (this.is_premium) {
+    return { 
+      allowed: true, 
+      reason: 'Premium user - unlimited access',
+      is_premium: true 
+    };
+  }
   
-  // Track referral
-  this.referral.referred_users.push({
-    user_id: newUser._id,
-    email: newUser.email,
-    signed_up_at: new Date(),
-    credits_given: creditsToGive
-  });
+  // === FREE USER CHECKS BELOW ===
   
-  this.referral.total_referrals += 1;
-  this.referral.total_credits_earned += creditsToGive;
+  // Check credits
+  if (this.credits.balance < 1) {
+    return { 
+      allowed: false, 
+      reason: 'Insufficient credits. You need at least 1 credit.',
+      credits_remaining: this.credits.balance,
+      next_reset: this.credits.next_reset_at
+    };
+  }
   
-  // Add transaction
-  this.credit_transactions.push({
-    type: 'referral',
-    amount: creditsToGive,
-    balance_after: this.credits.balance,
-    description: `Referral bonus for inviting ${newUser.email}`,
-    metadata: {
-      referral_user_id: newUser._id.toString(),
-      referral_user_email: newUser.email
-    }
-  });
+  // Check daily limit
+  if (this.usage.summaries_today >= this.usage.limits.daily_summaries) {
+    return { 
+      allowed: false, 
+      reason: `Daily limit of ${this.usage.limits.daily_summaries} summaries reached`,
+      daily_limit: this.usage.limits.daily_summaries,
+      summaries_today: this.usage.summaries_today,
+      resets_at: this.usage.daily_reset_at
+    };
+  }
   
-  await this.save();
+  // Check video duration limit
+  if (videoDuration > this.usage.limits.video_duration_seconds) {
+    const maxMinutes = Math.floor(this.usage.limits.video_duration_seconds / 60);
+    return { 
+      allowed: false, 
+      reason: `Video exceeds ${maxMinutes} minute limit for free users`,
+      video_duration_limit: maxMinutes,
+      video_duration_provided: Math.floor(videoDuration / 60)
+    };
+  }
   
-  console.log(`🎁 Referral credits: ${creditsToGive} credits given to ${this.email} (Referral #${referralCount + 1})`);
-  
-  return { creditsGiven: creditsToGive, totalReferrals: this.referral.total_referrals };
+  // All checks passed for free user
+  return { 
+    allowed: true, 
+    reason: 'Access granted',
+    credits_remaining: this.credits.balance,
+    daily_remaining: this.usage.limits.daily_summaries - this.usage.summaries_today
+  };
 };
 
-// ⭐ SIMPLIFIED: Log usage
+// Log usage
 userSchema.methods.logUsage = async function(usageData) {
-  this.usage.summaries_this_week += 1;
+  this.usage.summaries_today += 1;
   this.usage.summaries_this_month += 1;
   this.usage.total_summaries += 1;
   this.usage.last_summary_at = new Date();
   
-  this.usage_logs.push({
-    video_id: usageData.video_id,
-    credits_used: usageData.credits_used || 1,
-    success: usageData.success !== undefined ? usageData.success : true,
-    timestamp: new Date()
-  });
+  if (usageData.video_duration) {
+    this.usage.total_videos_watched += 1;
+    this.usage.total_time_saved += Math.floor(usageData.video_duration / 60);
+  }
   
-  // Keep only last 50 logs
-  if (this.usage_logs.length > 50) {
-    this.usage_logs = this.usage_logs.slice(-50);
+  this.usage_logs.push(usageData);
+  
+  // Keep only last 1000 logs
+  if (this.usage_logs.length > 1000) {
+    this.usage_logs = this.usage_logs.slice(-1000);
   }
   
   this.timestamps.last_activity = new Date();
@@ -506,7 +530,7 @@ userSchema.methods.logUsage = async function(usageData) {
   await this.save();
 };
 
-// ⭐ MONTHLY RESET (runs on 1st of each month)
+// Reset monthly credits
 userSchema.methods.resetMonthlyCredits = async function() {
   if (this.subscription.plan === 'free') {
     const now = new Date();
@@ -516,12 +540,10 @@ userSchema.methods.resetMonthlyCredits = async function() {
     
     const nextMonth = new Date(now);
     nextMonth.setMonth(nextMonth.getMonth() + 1);
-    nextMonth.setDate(1);
-    nextMonth.setHours(0, 0, 0, 0);
     this.credits.next_reset_at = nextMonth;
     
     this.credit_transactions.push({
-      type: 'monthly_reset',
+      type: 'earned',
       amount: this.credits.monthly_allocation,
       balance_after: this.credits.balance,
       description: 'Monthly credit reset'
@@ -530,28 +552,10 @@ userSchema.methods.resetMonthlyCredits = async function() {
     this.usage.summaries_this_month = 0;
     
     await this.save();
-    
-    console.log(`📅 Monthly reset: ${this.credits.monthly_allocation} credits for ${this.email}`);
   }
 };
 
-// ⭐ WEEKLY RESET (for tracking weekly usage)
-userSchema.methods.resetWeeklyUsage = async function() {
-  const now = new Date();
-  
-  this.usage.summaries_this_week = 0;
-  
-  const nextWeek = new Date(now);
-  nextWeek.setDate(nextWeek.getDate() + 7);
-  nextWeek.setHours(0, 0, 0, 0);
-  this.usage.week_reset_at = nextWeek;
-  
-  await this.save();
-  
-  console.log(`📊 Weekly reset for ${this.email}`);
-};
-
-// Upgrade subscription
+// Upgrade or downgrade subscription
 userSchema.methods.upgradeSubscription = async function(plan, billingCycle, stripeData = {}) {
   const previousPlan = this.subscription.plan;
   
@@ -573,8 +577,10 @@ userSchema.methods.upgradeSubscription = async function(plan, billingCycle, stri
     this.subscription.current_period_end = stripeData.currentPeriodEnd;
   }
   
+  // Update features and limits based on new plan
   this.updateFeatureAccess();
   
+  // Add transaction log
   this.credit_transactions.push({
     type: 'admin_adjustment',
     amount: 0,
@@ -589,37 +595,46 @@ userSchema.methods.upgradeSubscription = async function(plan, billingCycle, stri
   
   await this.save();
   
-  return {
-    previous_plan: previousPlan,
+  return { 
+    previous_plan: previousPlan, 
     new_plan: plan,
     features_updated: true
   };
 };
 
-// Update features based on plan
+// Update features based on subscription plan
 userSchema.methods.updateFeatureAccess = function() {
   const plan = this.subscription.plan;
   
   if (plan === 'free') {
+    // Free plan - limited features
     this.features.unlimited_summaries = false;
     this.features.unlimited_video_length = false;
     this.features.premium_ai_models = false;
     this.features.export_summaries = false;
     this.features.priority_support = false;
     
+    // Reset limits for free users
+    this.usage.limits.daily_summaries = 10;
+    this.usage.limits.monthly_summaries = 300;
     this.usage.limits.video_duration_seconds = 1200; // 20 minutes
+    
   } else if (plan === 'pro') {
+    // Pro plan - all features enabled
     this.features.unlimited_summaries = true;
     this.features.unlimited_video_length = true;
     this.features.premium_ai_models = true;
     this.features.export_summaries = true;
     this.features.priority_support = true;
     
-    this.usage.limits.video_duration_seconds = 999999; // No limit
+    // Remove limits for premium users
+    this.usage.limits.daily_summaries = 999999; // Effectively unlimited
+    this.usage.limits.monthly_summaries = 999999;
+    this.usage.limits.video_duration_seconds = 999999; // No duration limit
   }
 };
 
-// Cancel subscription
+// Cancel subscription (downgrade to free at period end)
 userSchema.methods.cancelSubscription = async function() {
   this.subscription.cancel_at_period_end = true;
   this.subscription.cancelled_at = new Date();
@@ -644,14 +659,20 @@ userSchema.methods.cancelSubscription = async function() {
   };
 };
 
-// Generate referral code
+// Generate referral code - FIXED: Prevent parallel save errors
 userSchema.methods.generateReferralCode = async function() {
+  // ✅ If code already exists, return it immediately (prevents regeneration)
   if (this.referral && this.referral.code) {
+    console.log('📌 Referral code already exists:', this.referral.code);
     return this.referral.code;
   }
 
+  console.log('🔄 Generating new referral code for user:', this._id);
+
+  // Generate a unique code
   const newCode = `REF${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
 
+  // ✅ CRITICAL: Use atomic findOneAndUpdate to prevent race conditions
   try {
     const updated = await mongoose.model('User').findOneAndUpdate(
       {
@@ -663,7 +684,7 @@ userSchema.methods.generateReferralCode = async function() {
         ]
       },
       {
-        $set: {
+        $set: { 
           'referral.code': newCode,
           'referral.total_referrals': 0,
           'referral.total_credits_earned': 0,
@@ -671,27 +692,44 @@ userSchema.methods.generateReferralCode = async function() {
         }
       },
       {
-        new: true,
+        new: true,  // Return updated document
         runValidators: true
       }
     );
 
     if (updated && updated.referral && updated.referral.code) {
+      // Success - update local instance
       this.referral = this.referral || {};
       this.referral.code = updated.referral.code;
+      console.log('✅ Referral code generated and saved:', updated.referral.code);
       return updated.referral.code;
     }
 
+    // Code was already set by another process - fetch and return it
+    console.log('⚠️ Code already set by another process, fetching...');
     const freshUser = await mongoose.model('User').findById(this._id);
+    
     if (freshUser && freshUser.referral && freshUser.referral.code) {
       this.referral = this.referral || {};
       this.referral.code = freshUser.referral.code;
+      console.log('✅ Using existing code from DB:', freshUser.referral.code);
       return freshUser.referral.code;
     }
 
+    // Fallback - should never reach here
+    console.error('❌ Failed to generate or fetch referral code');
     return null;
+
   } catch (error) {
     console.error('❌ Error in generateReferralCode:', error);
+    
+    // On error, try to fetch existing code
+    const freshUser = await mongoose.model('User').findById(this._id);
+    if (freshUser && freshUser.referral && freshUser.referral.code) {
+      this.referral.code = freshUser.referral.code;
+      return freshUser.referral.code;
+    }
+    
     throw error;
   }
 };
@@ -706,18 +744,19 @@ userSchema.pre('save', function(next) {
 });
 
 // ============================================
-// INDEXES
+// INDEXES FOR PERFORMANCE
 // ============================================
 
-// Only keep unique indexes here (fields already have index: true in schema)
-userSchema.index({ email: 1 }, { unique: true });
-userSchema.index({ googleId: 1 }, { unique: true });
-userSchema.index({ 'subscription.stripe_customer_id': 1 }, { unique: true, sparse: true });
-userSchema.index({ 'referral.code': 1 }, { unique: true, sparse: true });
-
-// Regular indexes
+userSchema.index({ email: 1 });
+userSchema.index({ googleId: 1 });
 userSchema.index({ 'subscription.plan': 1 });
+userSchema.index({ 'subscription.stripe_customer_id': 1 });
+userSchema.index({ 'referral.code': 1 });
 userSchema.index({ 'timestamps.created_at': -1 });
+userSchema.index({ 'referral.code': 1 }, { 
+  unique: true, 
+  sparse: true 
+});
 
 // ============================================
 // MODEL EXPORT

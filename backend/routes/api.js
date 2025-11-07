@@ -1,18 +1,42 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
-const storageService = require('../services/storageService');
+const Video = require('../models/Video');
 const crypto = require('crypto');
 
+// Import JWT middleware (NOT session-based)
 const { authenticateJWT, trackIP } = require('../middleware/auth');
+
+// Encryption helper functions
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.randomBytes(32);
+const IV_LENGTH = 16;
+
+function encryptApiKey(text) {
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), iv);
+  let encrypted = cipher.update(text);
+  encrypted = Buffer.concat([encrypted, cipher.final()]);
+  return iv.toString('hex') + ':' + encrypted.toString('hex');
+}
+
+function decryptApiKey(text) {
+  const textParts = text.split(':');
+  const iv = Buffer.from(textParts.shift(), 'hex');
+  const encryptedText = Buffer.from(textParts.join(':'), 'hex');
+  const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), iv);
+  let decrypted = decipher.update(encryptedText);
+  decrypted = Buffer.concat([decrypted, decipher.final()]);
+  return decrypted.toString();
+}
 
 // ============================================
 // USER PROFILE ROUTES
 // ============================================
 
+// Get full user profile with all stats
 router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
   try {
-    const user = req.user;
+    const user = req.user; // Already fetched by authenticateJWT
     
     // Initialize referral if it doesn't exist
     if (!user.referral) {
@@ -32,6 +56,7 @@ router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
         name: user.name,
         picture: user.picture,
         
+        // Complete Subscription Info
         subscription: {
           plan: user.subscription?.plan || 'free',
           status: user.subscription?.status || 'active',
@@ -39,34 +64,41 @@ router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
           started_at: user.subscription?.started_at || user.timestamps?.created_at,
           current_period_start: user.subscription?.current_period_start || null,
           current_period_end: user.subscription?.current_period_end || null,
-          cancel_at_period_end: user.subscription?.cancel_at_period_end || false
+          cancel_at_period_end: user.subscription?.cancel_at_period_end || false,
+          cancelled_at: user.subscription?.cancelled_at || null
         },
         
-        // ⭐ NEW CREDIT STRUCTURE
+        // Credits
         credits: {
-          balance: user.credits?.balance || 20,
-          monthly_allocation: user.credits?.monthly_allocation || 20,
+          balance: user.credits?.balance || 100,
+          monthly_allocation: user.credits?.monthly_allocation || 100,
           referral_credits: user.credits?.referral_credits || 0,
           next_reset_at: user.credits?.next_reset_at || new Date(),
-          lifetime_earned: user.credits?.lifetime_earned || 20,
+          lifetime_earned: user.credits?.lifetime_earned || 100,
           lifetime_spent: user.credits?.lifetime_spent || 0
         },
         
-        // ⭐ SIMPLIFIED USAGE
+        // Complete Usage Stats with Limits
         usage: {
+          summaries_today: user.usage?.summaries_today || 0,
           summaries_this_week: user.usage?.summaries_this_week || 0,
           summaries_this_month: user.usage?.summaries_this_month || 0,
           total_summaries: user.usage?.total_summaries || 0,
+          total_videos_watched: user.usage?.total_videos_watched || 0,
+          total_time_saved: user.usage?.total_time_saved || 0,
           last_summary_at: user.usage?.last_summary_at || null,
           
-          // ⭐ ONLY ONE LIMIT
+          // Usage Limits (crucial for dashboard)
           limits: {
+            daily_summaries: user.usage?.limits?.daily_summaries || 30,
+            monthly_summaries: user.usage?.limits?.monthly_summaries || 150,
             video_duration_seconds: user.usage?.limits?.video_duration_seconds || 1200
           },
           
-          week_reset_at: user.usage?.week_reset_at || new Date()
+          daily_reset_at: user.usage?.daily_reset_at || new Date()
         },
         
+        // Features (for Pro users)
         features: {
           unlimited_summaries: user.features?.unlimited_summaries || false,
           unlimited_video_length: user.features?.unlimited_video_length || false,
@@ -75,13 +107,14 @@ router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
           priority_support: user.features?.priority_support || false
         },
         
-        // ⭐ ENHANCED REFERRAL DATA
+        // Referral
         referral: {
           code: user.referral?.code || null,
           total_referrals: user.referral?.total_referrals || 0,
           total_credits_earned: user.referral?.total_credits_earned || 0
         },
         
+        // Timestamps
         timestamps: {
           created_at: user.timestamps?.created_at || user.createdAt,
           last_login: user.timestamps?.last_login || new Date(),
@@ -93,6 +126,16 @@ router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
     console.error('Profile error:', error);
     res.status(500).json({ error: 'Server error' });
   }
+});
+
+// Add this debug endpoint to see what's being returned
+router.get('/debug/redirect-test', (req, res) => {
+  res.json({
+    FRONTEND_URL: process.env.FRONTEND_URL,
+    callbackUrl: `${process.env.FRONTEND_URL}/auth/callback?success=true`,
+    dashboardUrl: `${process.env.FRONTEND_URL}/dashboard`,
+    loginUrl: `${process.env.FRONTEND_URL}/login`
+  });
 });
 
 // ============================================
@@ -123,21 +166,25 @@ router.get('/credits/balance', authenticateJWT, async (req, res) => {
 });
 
 // ============================================
-// VIDEO SUMMARY ROUTES (WITH EXTERNAL STORAGE)
+// VIDEO SUMMARY ROUTES (WITH CACHING)
 // ============================================
 
-// ⭐ NEW: Check cache in Supabase
 router.post('/summary/check-cache', authenticateJWT, async (req, res) => {
   try {
-    const { video_id } = req.body;
+    const { video_id, ai_provider = 'openai', length = 'medium' } = req.body;
     
-    const cached = await storageService.getSummary(video_id);
+    const cached = await Video.getCachedSummary(video_id, ai_provider, length);
     
     if (cached) {
       res.json({
         success: true,
         cached: true,
-        summary: cached
+        video: {
+          id: cached.video.video_id,
+          title: cached.video.title,
+          duration: cached.video.duration
+        },
+        summary: cached.summary
       });
     } else {
       res.json({
@@ -152,7 +199,6 @@ router.post('/summary/check-cache', authenticateJWT, async (req, res) => {
   }
 });
 
-// ⭐ UPDATED: Generate summary with external storage
 router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
   try {
     const {
@@ -161,42 +207,56 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
       video_url,
       video_duration,
       channel_name,
+      channel_id,
       ai_provider = 'openai',
       model_used = 'gpt-4',
-      summary_length = 'medium'
+      summary_length = 'medium',
+      thumbnail_url
     } = req.body;
 
     const user = req.user;
 
-    // ⭐ Check for cached summary in Supabase first
-    const cachedResult = await storageService.getSummary(video_id);
+    // Check for cached summary
+    const cachedResult = await Video.getCachedSummary(video_id, ai_provider, summary_length);
     
     if (cachedResult) {
       console.log('✅ Cache HIT! Returning cached summary');
       
-      // Still deduct credit for free users (1 credit per summary)
       if (user.subscription.plan === 'free') {
         await user.deductCredits(1, 'Video summary (cached)', {
           video_id,
-          video_title
+          video_title,
+          cached: true
         });
       }
       
       await user.logUsage({
         video_id,
+        video_title,
+        video_url,
+        video_duration,
+        channel_name,
+        ai_provider,
+        model_used,
+        summary_length,
         credits_used: user.subscription.plan === 'free' ? 1 : 0,
+        processing_time: 0,
         success: true
       });
       
       return res.json({
         success: true,
         cached: true,
-        summary: cachedResult.text,
-        key_points: cachedResult.key_points,
-        chapters: cachedResult.chapters,
+        summary: cachedResult.summary.text,
+        key_points: cachedResult.summary.key_points,
+        chapters: cachedResult.summary.chapters,
+        video: {
+          id: cachedResult.video.video_id,
+          title: cachedResult.video.title,
+          duration: cachedResult.video.duration
+        },
         credits_remaining: user.credits.balance,
         usage: {
-          summaries_this_week: user.usage.summaries_this_week,
           summaries_this_month: user.usage.summaries_this_month,
           total_summaries: user.usage.total_summaries
         }
@@ -205,7 +265,7 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
 
     console.log('❌ Cache MISS! Generating new summary');
 
-    // ⭐ Check if user can generate
+    // Check if user can generate
     const canGenerate = user.canGenerateSummary(video_duration);
     if (!canGenerate.allowed) {
       return res.status(403).json({
@@ -215,12 +275,13 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
       });
     }
 
-    // ⭐ Deduct 1 credit for free users
+    // Deduct credits for free users
     if (user.subscription.plan === 'free') {
       await user.deductCredits(1, 'Video summary generated', {
         video_id,
         video_title,
-        video_duration
+        video_duration,
+        ai_provider
       });
     }
 
@@ -236,22 +297,49 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
     });
     const processingTime = Date.now() - startTime;
 
-    // ⭐ Save to Supabase (external storage)
-    await storageService.saveSummary(video_id, {
-      text: aiResponse.summary,
-      key_points: aiResponse.key_points || [],
-      chapters: aiResponse.chapters || [],
+    // Cache the summary
+    let video = await Video.findOne({ video_id });
+    
+    if (!video) {
+      video = await Video.create({
+        video_id,
+        video_url,
+        title: video_title,
+        channel_name,
+        channel_id,
+        duration: video_duration,
+        thumbnail_url
+      });
+    }
+    
+    video.addSummary({
       ai_provider,
       model: model_used,
       length: summary_length,
+      text: aiResponse.summary,
+      key_points: aiResponse.key_points || [],
+      chapters: aiResponse.chapters || [],
+      tags: aiResponse.tags || [],
       word_count: aiResponse.summary.split(' ').length,
-      processing_time: processingTime
+      processing_time: processingTime,
+      tokens_used: aiResponse.tokens_used || 0,
+      cost: aiResponse.cost || 0
     });
+    
+    await video.save();
 
     // Log usage
     await user.logUsage({
       video_id,
+      video_title,
+      video_url,
+      video_duration,
+      channel_name,
+      ai_provider,
+      model_used,
+      summary_length,
       credits_used: user.subscription.plan === 'free' ? 1 : 0,
+      processing_time: processingTime,
       success: true
     });
 
@@ -264,9 +352,13 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
       summary: aiResponse.summary,
       key_points: aiResponse.key_points,
       chapters: aiResponse.chapters,
+      video: {
+        id: video_id,
+        title: video_title,
+        duration: video_duration
+      },
       credits_remaining: user.credits.balance,
       usage: {
-        summaries_this_week: user.usage.summaries_this_week,
         summaries_this_month: user.usage.summaries_this_month,
         total_summaries: user.usage.total_summaries
       },
@@ -279,7 +371,9 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
     if (req.user) {
       await req.user.logUsage({
         video_id: req.body.video_id,
-        success: false
+        video_title: req.body.video_title,
+        success: false,
+        error_message: error.message
       });
     }
     
@@ -287,42 +381,43 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
   }
 });
 
-// Mock AI function (replace with real AI integration)
+// Mock AI function
 async function generateSummaryWithAI(options) {
-  // Simulate API delay
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  
   return {
-    summary: `This is a ${options.length} summary of: ${options.video_title}. Generated using ${options.provider}.`,
+    summary: `This is a ${options.length} summary of: ${options.video_title}`,
     key_points: [
-      'Key insight from the video content',
-      'Important concept discussed in detail',
-      'Main takeaway for viewers'
+      'Key point 1 from the video',
+      'Key point 2 from the video',
+      'Key point 3 from the video'
     ],
     chapters: [
-      { title: 'Introduction', timestamp: '0:00', summary: 'Video overview' },
-      { title: 'Main Discussion', timestamp: '3:15', summary: 'Core content' },
-      { title: 'Conclusion', timestamp: '8:30', summary: 'Final thoughts' }
+      { title: 'Introduction', timestamp: '0:00', summary: 'Video introduction' },
+      { title: 'Main Content', timestamp: '2:30', summary: 'Main discussion points' },
+      { title: 'Conclusion', timestamp: '8:45', summary: 'Final thoughts' }
     ],
+    tags: ['education', 'tutorial', 'tech'],
     tokens_used: 500,
     cost: 0.01
   };
 }
 
-// ⭐ SIMPLIFIED: Get recent usage history
 router.get('/summary/history', authenticateJWT, async (req, res) => {
   try {
-    const { limit = 20 } = req.query;
+    const { page = 1, limit = 20 } = req.query;
     const user = req.user;
 
     const history = user.usage_logs
       .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, limit);
+      .slice((page - 1) * limit, page * limit);
 
     res.json({
       success: true,
       history,
-      total: user.usage_logs.length
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: user.usage_logs.length
+      }
     });
   } catch (error) {
     console.error('History fetch error:', error);
@@ -331,52 +426,7 @@ router.get('/summary/history', authenticateJWT, async (req, res) => {
 });
 
 // ============================================
-// REFERRAL ROUTES
-// ============================================
-
-// Generate referral code
-router.post('/referral/generate', authenticateJWT, async (req, res) => {
-  try {
-    const user = req.user;
-    
-    const code = await user.generateReferralCode();
-    
-    res.json({
-      success: true,
-      referral_code: code,
-      share_url: `${process.env.FRONTEND_URL}/signup?ref=${code}`
-    });
-  } catch (error) {
-    console.error('Referral code generation error:', error);
-    res.status(500).json({ error: 'Failed to generate referral code' });
-  }
-});
-
-// Get referral stats
-router.get('/referral/stats', authenticateJWT, async (req, res) => {
-  try {
-    const user = req.user;
-    
-    res.json({
-      success: true,
-      referral: {
-        code: user.referral?.code || null,
-        total_referrals: user.referral?.total_referrals || 0,
-        total_credits_earned: user.referral?.total_credits_earned || 0,
-        referred_users: user.referral?.referred_users || [],
-        share_url: user.referral?.code 
-          ? `${process.env.FRONTEND_URL}/signup?ref=${user.referral.code}`
-          : null
-      }
-    });
-  } catch (error) {
-    console.error('Referral stats error:', error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// ============================================
-// SUBSCRIPTION ROUTES (STRIPE READY)
+// SUBSCRIPTION ROUTES
 // ============================================
 
 router.post('/subscription/upgrade', authenticateJWT, async (req, res) => {
@@ -399,24 +449,10 @@ router.post('/subscription/upgrade', authenticateJWT, async (req, res) => {
   }
 });
 
-router.post('/subscription/cancel', authenticateJWT, async (req, res) => {
-  try {
-    const user = req.user;
-    
-    const result = await user.cancelSubscription();
-    
-    res.json(result);
-  } catch (error) {
-    console.error('Cancellation error:', error);
-    res.status(500).json({ error: 'Cancellation failed' });
-  }
-});
-
 // ============================================
 // ADMIN ROUTES
 // ============================================
 
-// ⭐ NEW: Manual monthly credit reset trigger
 router.post('/admin/reset-monthly-credits', async (req, res) => {
   try {
     const freeUsers = await User.find({
@@ -435,7 +471,7 @@ router.post('/admin/reset-monthly-credits', async (req, res) => {
 
     res.json({
       success: true,
-      message: `Reset credits for ${resetCount} users`
+      message: `Reset for ${resetCount} users`
     });
   } catch (error) {
     console.error('Reset error:', error);
@@ -443,42 +479,26 @@ router.post('/admin/reset-monthly-credits', async (req, res) => {
   }
 });
 
-// ⭐ NEW: Storage stats (Supabase)
-router.get('/admin/storage-stats', async (req, res) => {
+router.get('/admin/cache-stats', async (req, res) => {
   try {
-    const stats = await storageService.getStats();
+    const totalVideos = await Video.countDocuments();
+    const totalSummaries = await Video.aggregate([
+      { $project: { summaryCount: { $size: '$summaries' } } },
+      { $group: { _id: null, total: { $sum: '$summaryCount' } } }
+    ]);
     
+    const mostPopular = await Video.getMostPopular(10);
+
     res.json({
       success: true,
       stats: {
-        summaries_stored: stats.summaries,
-        transcripts_stored: stats.transcripts,
-        storage_provider: 'Supabase'
+        total_cached_videos: totalVideos,
+        total_cached_summaries: totalSummaries[0]?.total || 0,
+        most_popular_videos: mostPopular
       }
     });
   } catch (error) {
     console.error('Stats error:', error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// User stats
-router.get('/admin/user-stats', async (req, res) => {
-  try {
-    const totalUsers = await User.countDocuments();
-    const freeUsers = await User.countDocuments({ 'subscription.plan': 'free' });
-    const proUsers = await User.countDocuments({ 'subscription.plan': 'pro' });
-    
-    res.json({
-      success: true,
-      stats: {
-        total_users: totalUsers,
-        free_users: freeUsers,
-        pro_users: proUsers
-      }
-    });
-  } catch (error) {
-    console.error('User stats error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
