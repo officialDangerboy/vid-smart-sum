@@ -1,75 +1,54 @@
 const cron = require('node-cron');
 const {
-  resetDailyUsage,
   resetMonthlyCredits,
-  cleanupExpiredCache,
+  resetWeeklyUsage,
   notifyLowCreditUsers,
   generateWeeklyAnalytics,
   checkExpiredSubscriptions,
   cleanupOldLogs
-} = require('./cronJobs');
+} = require('./cronJobs_UPDATED');
 
 // Error logging helper
 function logCronError(jobName, error) {
   console.error(`\n❌ [CRON ERROR] ${jobName} failed at ${new Date().toISOString()}`);
   console.error('Error:', error.message);
   console.error('Stack:', error.stack);
-
-  // TODO: Send alert to admin (email, Slack, etc.)
-  // await sendAdminAlert({ job: jobName, error: error.message });
 }
 
+// ============================================
+// INITIALIZE ALL CRON JOBS
+// ============================================
 
-cron.schedule('* * * * *', async () => {
-  console.log('\n⏱️  [EVERY MINUTE] Running at', new Date().toISOString());
-  try {
-    // Your minute-by-minute logic here
-    // Example: Check for pending urgent tasks
-    await resetMonthlyCredits();
-    await resetDailyUsage();
-
-
-  } catch (error) {
-    console.error('Every minute job failed:', error);
-  }
-}, {
-  timezone: "UTC"
-});
-
-// Initialize all cron jobs
 function initializeCronJobs() {
   console.log('⏰ Initializing cron jobs...\n');
 
-  // Run every day at midnight (00:00 UTC)
-  // Resets daily usage counters for all users
-  cron.schedule('0 0 * * *', async () => {
-    console.log('\n🕐 [DAILY] Running daily reset at', new Date().toISOString());
+  // ⭐ MONTHLY CREDIT RESET - 1st of each month at 00:00 UTC
+  cron.schedule('0 0 1 * *', async () => {
+    console.log('\n🗓️  [MONTHLY] Running monthly credit reset at', new Date().toISOString());
     try {
-      await resetDailyUsage();
+      await resetMonthlyCredits();
     } catch (error) {
-      logCronError('Daily Reset', error);
+      logCronError('Monthly Credit Reset', error);
     }
   }, {
     timezone: "UTC"
   });
 
-  // Run every day at 1:00 AM UTC (FIXED - was running every hour!)
-  // Checks and resets monthly credits for free users
-  // cron.schedule('0 1 * * *', async () => {
-  //   console.log('\n🕐 [DAILY] Running monthly credit check at', new Date().toISOString());
-  //   try {
-  //     await resetMonthlyCredits();
-  //   } catch (error) {
-  //     logCronError('Monthly Credit Reset', error);
-  //   }
-  // }, {
-  //   timezone: "UTC"
-  // });
+  // ⭐ WEEKLY USAGE RESET - Every Monday at 00:00 UTC
+  cron.schedule('0 0 * * 1', async () => {
+    console.log('\n📊 [WEEKLY] Running weekly usage reset at', new Date().toISOString());
+    try {
+      await resetWeeklyUsage();
+    } catch (error) {
+      logCronError('Weekly Usage Reset', error);
+    }
+  }, {
+    timezone: "UTC"
+  });
 
-  // Run every day at 2:00 AM UTC
-  // Check for expired subscriptions and downgrade
-  cron.schedule('0 2 * * *', async () => {
-    console.log('\n🕐 [DAILY] Checking expired subscriptions at', new Date().toISOString());
+  // DAILY: Check for expired subscriptions - Every day at 00:30 UTC
+  cron.schedule('30 0 * * *', async () => {
+    console.log('\n⏰ [DAILY] Checking expired subscriptions at', new Date().toISOString());
     try {
       await checkExpiredSubscriptions();
     } catch (error) {
@@ -79,10 +58,9 @@ function initializeCronJobs() {
     timezone: "UTC"
   });
 
-  // Run every day at 3:00 AM UTC
-  // Send low credit notifications to free users
-  cron.schedule('0 3 * * *', async () => {
-    console.log('\n🕐 [DAILY] Sending low credit notifications at', new Date().toISOString());
+  // DAILY: Send low credit notifications - Every day at 09:00 UTC (morning)
+  cron.schedule('0 9 * * *', async () => {
+    console.log('\n🔔 [DAILY] Sending low credit notifications at', new Date().toISOString());
     try {
       await notifyLowCreditUsers();
     } catch (error) {
@@ -92,23 +70,9 @@ function initializeCronJobs() {
     timezone: "UTC"
   });
 
-  // Run every Sunday at 4:00 AM UTC
-  // Clean up expired video cache
-  cron.schedule('0 4 * * 0', async () => {
-    console.log('\n🕐 [WEEKLY] Running cache cleanup at', new Date().toISOString());
-    try {
-      await cleanupExpiredCache();
-    } catch (error) {
-      logCronError('Cache Cleanup', error);
-    }
-  }, {
-    timezone: "UTC"
-  });
-
-  // Run every Monday at 5:00 AM UTC
-  // Generate weekly analytics
-  cron.schedule('0 5 * * 1', async () => {
-    console.log('\n🕐 [WEEKLY] Generating analytics at', new Date().toISOString());
+  // WEEKLY: Generate analytics - Every Monday at 01:00 UTC
+  cron.schedule('0 1 * * 1', async () => {
+    console.log('\n📈 [WEEKLY] Generating weekly analytics at', new Date().toISOString());
     try {
       await generateWeeklyAnalytics();
     } catch (error) {
@@ -118,10 +82,9 @@ function initializeCronJobs() {
     timezone: "UTC"
   });
 
-  // Run on 1st of every month at 6:00 AM UTC
-  // Clean up old logs (keeps last 3 months)
-  cron.schedule('0 6 1 * *', async () => {
-    console.log('\n🕐 [MONTHLY] Cleaning up old logs at', new Date().toISOString());
+  // MONTHLY: Clean up old logs - 1st of each month at 02:00 UTC
+  cron.schedule('0 2 1 * *', async () => {
+    console.log('\n🗑️  [MONTHLY] Cleaning up old logs at', new Date().toISOString());
     try {
       await cleanupOldLogs();
     } catch (error) {
@@ -133,28 +96,26 @@ function initializeCronJobs() {
 
   console.log('✅ All cron jobs scheduled successfully!\n');
   console.log('📅 Schedule (All times in UTC):');
-  console.log('  - Daily Usage Reset:       Every day at 00:00');
-  console.log('  - Monthly Credit Reset:    Every day at 01:00');
-  console.log('  - Expired Subscriptions:   Every day at 02:00');
-  console.log('  - Low Credit Alerts:       Every day at 03:00');
-  console.log('  - Cache Cleanup:           Every Sunday at 04:00');
-  console.log('  - Weekly Analytics:        Every Monday at 05:00');
-  console.log('  - Old Logs Cleanup:        1st of month at 06:00\n');
+  console.log('  - Monthly Credit Reset:    1st of month at 00:00');
+  console.log('  - Weekly Usage Reset:      Every Monday at 00:00');
+  console.log('  - Expired Subscriptions:   Every day at 00:30');
+  console.log('  - Low Credit Alerts:       Every day at 09:00');
+  console.log('  - Weekly Analytics:        Every Monday at 01:00');
+  console.log('  - Old Logs Cleanup:        1st of month at 02:00\n');
 }
 
-// Manual trigger functions for testing
+// ============================================
+// MANUAL TRIGGER FUNCTIONS (for testing)
+// ============================================
+
 const manualTriggers = {
-  resetDaily: async () => {
-    console.log('🔧 Manual trigger: Daily Reset');
-    return await resetDailyUsage();
-  },
   resetMonthly: async () => {
     console.log('🔧 Manual trigger: Monthly Credit Reset');
     return await resetMonthlyCredits();
   },
-  cleanupCache: async () => {
-    console.log('🔧 Manual trigger: Cache Cleanup');
-    return await cleanupExpiredCache();
+  resetWeekly: async () => {
+    console.log('🔧 Manual trigger: Weekly Usage Reset');
+    return await resetWeeklyUsage();
   },
   notifyLowCredits: async () => {
     console.log('🔧 Manual trigger: Low Credit Notifications');
