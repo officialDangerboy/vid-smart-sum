@@ -3,6 +3,7 @@ const router = express.Router();
 const User = require('../models/User');
 const Video = require('../models/Video');
 const crypto = require('crypto');
+const supabaseService = require('../services/supabaseService');
 
 // Import JWT middleware (NOT session-based)
 const { authenticateJWT, trackIP } = require('../middleware/auth');
