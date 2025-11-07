@@ -37,7 +37,7 @@ function decryptApiKey(text) {
 router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
   try {
     const user = req.user; // Already fetched by authenticateJWT
-    
+
     // Initialize referral if it doesn't exist
     if (!user.referral) {
       user.referral = {
@@ -47,7 +47,7 @@ router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
         total_credits_earned: 0
       };
     }
-    
+
     res.json({
       success: true,
       user: {
@@ -55,7 +55,7 @@ router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
         email: user.email,
         name: user.name,
         picture: user.picture,
-        
+
         // Complete Subscription Info
         subscription: {
           plan: user.subscription?.plan || 'free',
@@ -67,7 +67,7 @@ router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
           cancel_at_period_end: user.subscription?.cancel_at_period_end || false,
           cancelled_at: user.subscription?.cancelled_at || null
         },
-        
+
         // Credits
         credits: {
           balance: user.credits?.balance || 100,
@@ -77,7 +77,7 @@ router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
           lifetime_earned: user.credits?.lifetime_earned || 100,
           lifetime_spent: user.credits?.lifetime_spent || 0
         },
-        
+
         // Complete Usage Stats with Limits
         usage: {
           summaries_today: user.usage?.summaries_today || 0,
@@ -87,17 +87,17 @@ router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
           total_videos_watched: user.usage?.total_videos_watched || 0,
           total_time_saved: user.usage?.total_time_saved || 0,
           last_summary_at: user.usage?.last_summary_at || null,
-          
+
           // Usage Limits (crucial for dashboard)
           limits: {
             daily_summaries: user.usage?.limits?.daily_summaries || 30,
             monthly_summaries: user.usage?.limits?.monthly_summaries || 150,
             video_duration_seconds: user.usage?.limits?.video_duration_seconds || 1200
           },
-          
+
           daily_reset_at: user.usage?.daily_reset_at || new Date()
         },
-        
+
         // Features (for Pro users)
         features: {
           unlimited_summaries: user.features?.unlimited_summaries || false,
@@ -106,14 +106,14 @@ router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
           export_summaries: user.features?.export_summaries || false,
           priority_support: user.features?.priority_support || false
         },
-        
+
         // Referral
         referral: {
           code: user.referral?.code || null,
           total_referrals: user.referral?.total_referrals || 0,
           total_credits_earned: user.referral?.total_credits_earned || 0
         },
-        
+
         // Timestamps
         timestamps: {
           created_at: user.timestamps?.created_at || user.createdAt,
@@ -165,48 +165,6 @@ router.get('/credits/balance', authenticateJWT, async (req, res) => {
   }
 });
 
-// ============================================
-// VIDEO SUMMARY ROUTES (WITH CACHING)
-// ============================================
-
-router.post('/transcript/check-cache', authenticateJWT, async (req, res) => {
-  try {
-    const { video_id } = req.body;
-    
-    // Check Supabase first
-    const cachedTranscript = await supabaseService.getTranscript(video_id);
-    
-    if (cachedTranscript) {
-      // Update access stats
-      await supabaseService.updateTranscriptAccess(video_id);
-      
-      return res.json({
-        success: true,
-        cached: true,
-        source: 'supabase',
-        transcript: {
-          video_id: cachedTranscript.video_id,
-          video_title: cachedTranscript.video_title,
-          full_text: cachedTranscript.full_text,
-          segments: cachedTranscript.segments,
-          language: cachedTranscript.language,
-          word_count: cachedTranscript.word_count,
-          source: cachedTranscript.source
-        }
-      });
-    }
-    
-    res.json({
-      success: true,
-      cached: false,
-      message: 'No cached transcript found'
-    });
-  } catch (error) {
-    console.error('Transcript cache check error:', error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
 router.post('/transcript/fetch', authenticateJWT, trackIP, async (req, res) => {
   try {
     const {
@@ -215,18 +173,18 @@ router.post('/transcript/fetch', authenticateJWT, trackIP, async (req, res) => {
       channel_name,
       duration
     } = req.body;
-    
+
     const user = req.user;
-    
+
     // 1. Check Supabase cache first
     let transcript = await supabaseService.getTranscript(video_id);
-    
+
     if (transcript) {
       console.log('✅ TRANSCRIPT CACHE HIT (Supabase)');
-      
+
       // Update access stats
       await supabaseService.updateTranscriptAccess(video_id);
-      
+
       // Track in MongoDB (lightweight tracking only)
       let video = await Video.findOne({ video_id });
       if (!video) {
@@ -240,7 +198,7 @@ router.post('/transcript/fetch', authenticateJWT, trackIP, async (req, res) => {
       }
       video.trackUserAccess(user._id, user.email);
       await video.save();
-      
+
       return res.json({
         success: true,
         cached: true,
@@ -253,28 +211,29 @@ router.post('/transcript/fetch', authenticateJWT, trackIP, async (req, res) => {
         }
       });
     }
-    
+
     console.log('❌ TRANSCRIPT CACHE MISS - Fetching from YouTube');
-    
+
     // 2. Fetch from YouTube API
     const fetchedTranscript = await fetchTranscriptFromYouTube(video_id);
-    
+
     if (!fetchedTranscript) {
       return res.status(404).json({ error: 'Transcript not available for this video' });
     }
-    
+
     // 3. Store in Supabase
+    // In your /transcript/fetch route, after fetching from YouTube:
     const storedTranscript = await supabaseService.storeTranscript({
       video_id,
-      video_title,
-      channel_name,
+      video_title: fetchedTranscript.video_title,  // From API response
+      channel_name: fetchedTranscript.channel_name,  // From API response
       duration,
       full_text: fetchedTranscript.full_text,
       segments: fetchedTranscript.segments,
       language: fetchedTranscript.language,
       source: fetchedTranscript.source
     });
-    
+
     // 4. Track in MongoDB (lightweight)
     let video = await Video.findOne({ video_id });
     if (!video) {
@@ -288,7 +247,7 @@ router.post('/transcript/fetch', authenticateJWT, trackIP, async (req, res) => {
     }
     video.trackUserAccess(user._id, user.email);
     await video.save();
-    
+
     res.json({
       success: true,
       cached: false,
@@ -300,7 +259,7 @@ router.post('/transcript/fetch', authenticateJWT, trackIP, async (req, res) => {
         word_count: storedTranscript.word_count
       }
     });
-    
+
   } catch (error) {
     console.error('Transcript fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch transcript' });
@@ -314,14 +273,14 @@ router.post('/transcript/fetch', authenticateJWT, trackIP, async (req, res) => {
 router.post('/summary/check-cache', authenticateJWT, async (req, res) => {
   try {
     const { video_id, ai_provider = 'openai', length = 'medium' } = req.body;
-    
+
     // Check Supabase first
     const cachedSummary = await supabaseService.getSummary(video_id, ai_provider, length);
-    
+
     if (cachedSummary) {
       // Update access stats
       await supabaseService.updateSummaryAccess(video_id, ai_provider, length);
-      
+
       return res.json({
         success: true,
         cached: true,
@@ -340,7 +299,7 @@ router.post('/summary/check-cache', authenticateJWT, async (req, res) => {
         }
       });
     }
-    
+
     res.json({
       success: true,
       cached: false,
@@ -371,13 +330,13 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
 
     // 1. Check Supabase cache first
     let summary = await supabaseService.getSummary(video_id, ai_provider, summary_length);
-    
+
     if (summary) {
       console.log('✅ SUMMARY CACHE HIT (Supabase)');
-      
+
       // Update access stats
       await supabaseService.updateSummaryAccess(video_id, ai_provider, summary_length);
-      
+
       // Deduct credits for free users
       if (user.subscription.plan === 'free') {
         await user.deductCredits(1, 'Video summary (cached)', {
@@ -386,7 +345,7 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
           cached: true
         });
       }
-      
+
       // Log usage
       await user.logUsage({
         video_id,
@@ -401,7 +360,7 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
         processing_time: 0,
         success: true
       });
-      
+
       // Track in MongoDB (lightweight)
       let video = await Video.findOne({ video_id });
       if (!video) {
@@ -417,7 +376,7 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
       }
       video.trackUserAccess(user._id, user.email);
       await video.save();
-      
+
       return res.json({
         success: true,
         cached: true,
@@ -493,7 +452,7 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
       generated_by_user_id: user._id.toString(),
       generated_by_user_email: user.email
     });
-    
+
     // 6. Track in MongoDB (lightweight)
     let video = await Video.findOne({ video_id });
     if (!video) {
@@ -552,7 +511,7 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
 
   } catch (error) {
     console.error('Summary generation error:', error);
-    
+
     if (req.user) {
       await req.user.logUsage({
         video_id: req.body.video_id,
@@ -561,7 +520,7 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
         error_message: error.message
       });
     }
-    
+
     res.status(500).json({ error: 'Summary generation failed', message: error.message });
   }
 });
@@ -590,17 +549,44 @@ async function generateSummaryWithAI(options) {
 
 // Mock YouTube transcript fetch (replace with actual implementation)
 async function fetchTranscriptFromYouTube(videoId) {
-  // TODO: Integrate with YouTube Transcript API
-  return {
-    full_text: 'This is the full transcript text...',
-    segments: [
-      { text: 'Hello and welcome', start_time: 0, end_time: 2 },
-      { text: 'In this video we will discuss', start_time: 2, end_time: 5 }
-    ],
-    language: 'en',
-    source: 'youtube_auto'
-  };
+  try {
+    const response = await fetch(
+      "https://web-production-ab45.up.railway.app/api/transcript/byapi",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"  // ADD THIS!
+        },
+        body: JSON.stringify({ video_id: videoId })
+      }
+    );
+
+    const data = await response.json();
+
+    if (!data.success) {
+      throw new Error("Transcript not available");
+    }
+
+    // Transform API response to match your schema
+    return {
+      full_text: data.plain_text || "",
+      segments: (data.transcript_segments || []).map(seg => ({
+        text: seg.text || "",
+        start: parseFloat(seg.start || 0),
+        duration: parseFloat(seg.dur || 0)
+      })),
+      language: data.language || "unknown",
+      source: data.source || "youtube-transcript.io",
+      video_title: data.title,
+      channel_name: data.author,
+      word_count: data.word_count
+    };
+  } catch (err) {
+    console.error("Error fetching transcript:", err);
+    return null;  // Return null on error
+  }
 }
+
 
 // ============================================
 // ADMIN ROUTES (WITH SUPABASE STATS)
@@ -610,7 +596,7 @@ router.get('/admin/cache-stats', authenticateJWT, async (req, res) => {
   try {
     // Get stats from both Supabase and MongoDB
     const supabaseStats = await supabaseService.getCacheStats();
-    
+
     const mongoStats = {
       total_videos: await Video.countDocuments(),
       most_popular: await Video.getMostPopular(10)
@@ -633,7 +619,7 @@ router.get('/admin/cache-stats', authenticateJWT, async (req, res) => {
 router.get('/admin/trending', authenticateJWT, async (req, res) => {
   try {
     const trending = await supabaseService.getTrendingVideos(20);
-    
+
     res.json({
       success: true,
       trending

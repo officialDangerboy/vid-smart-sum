@@ -45,14 +45,16 @@ async function storeTranscript(transcriptData) {
       channel_name,
       duration,
       full_text,
-      segments,
+      segments = [],
       language = 'en',
-      word_count,
       source = 'youtube_auto'
     } = transcriptData;
-    
+
+    const word_count = full_text ? full_text.trim().split(/\s+/).length : 0;
+    access_count: supabase.raw('access_count + 1')
+
     console.log(`💾 Storing transcript in Supabase: ${video_id}`);
-    
+
     const { data, error } = await supabase
       .from('video_transcripts')
       .upsert({
@@ -61,22 +63,19 @@ async function storeTranscript(transcriptData) {
         channel_name,
         duration,
         full_text,
-        segments: segments || [],
+        segments,
         language,
-        word_count: word_count || (full_text ? full_text.split(/\s+/).length : 0),
+        word_count,
         source,
         generated_at: new Date().toISOString(),
         last_accessed: new Date().toISOString(),
         access_count: 1
-      }, {
-        onConflict: 'video_id',
-        ignoreDuplicates: false
-      })
+      }, { onConflict: 'video_id' })
       .select()
       .single();
-    
+
     if (error) throw error;
-    
+
     console.log(`✅ Transcript stored in Supabase: ${video_id}`);
     return data;
   } catch (error) {
@@ -84,6 +83,7 @@ async function storeTranscript(transcriptData) {
     throw error;
   }
 }
+
 
 /**
  * Update transcript access stats
