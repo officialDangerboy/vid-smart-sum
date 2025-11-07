@@ -165,7 +165,7 @@ router.get('/credits/balance', authenticateJWT, async (req, res) => {
   }
 });
 
-router.post('/transcript/fetch', authenticateJWT, trackIP, async (req, res) => {
+router.post('/transcript/fetch', async (req, res) => {
   try {
     const {
       video_id,
