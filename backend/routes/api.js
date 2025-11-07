@@ -165,45 +165,28 @@ router.get('/credits/balance', authenticateJWT, async (req, res) => {
   }
 });
 
-router.post('/transcript/fetch', async (req, res) => {
+router.post('/transcript/fetch', authenticateJWT, trackIP, async (req, res) => {
   try {
-    const {
-      video_id,
-      video_title,
-      channel_name,
-      duration
-    } = req.body;
-
+    const { video_id } = req.body;  // Only video_id needed!
     const user = req.user;
 
     // 1. Check Supabase cache first
     let transcript = await supabaseService.getTranscript(video_id);
 
     if (transcript) {
-      console.log('✅ TRANSCRIPT CACHE HIT (Supabase)');
+      console.log('✅ TRANSCRIPT FOUND IN SUPABASE - Returning cached data');
 
       // Update access stats
       await supabaseService.updateTranscriptAccess(video_id);
-
-      // Track in MongoDB (lightweight tracking only)
-      let video = await Video.findOne({ video_id });
-      if (!video) {
-        video = await Video.create({
-          video_id,
-          video_url: `https://youtube.com/watch?v=${video_id}`,
-          title: video_title,
-          channel_name,
-          duration
-        });
-      }
-      video.trackUserAccess(user._id, user.email);
-      await video.save();
 
       return res.json({
         success: true,
         cached: true,
         source: 'supabase',
-        transcript: {
+        data: {
+          video_id: transcript.video_id,
+          video_title: transcript.video_title,
+          channel_name: transcript.channel_name,
           full_text: transcript.full_text,
           segments: transcript.segments,
           language: transcript.language,
@@ -212,47 +195,39 @@ router.post('/transcript/fetch', async (req, res) => {
       });
     }
 
-    console.log('❌ TRANSCRIPT CACHE MISS - Fetching from YouTube');
+    console.log('❌ NOT IN SUPABASE - Calling external API');
 
-    // 2. Fetch from YouTube API
+    // 2. Call external API to get transcript
     const fetchedTranscript = await fetchTranscriptFromYouTube(video_id);
 
     if (!fetchedTranscript) {
-      return res.status(404).json({ error: 'Transcript not available for this video' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Transcript not available for this video' 
+      });
     }
 
     // 3. Store in Supabase
-    // In your /transcript/fetch route, after fetching from YouTube:
     const storedTranscript = await supabaseService.storeTranscript({
       video_id,
-      video_title: fetchedTranscript.video_title,  // From API response
-      channel_name: fetchedTranscript.channel_name,  // From API response
-      duration,
+      video_title: fetchedTranscript.video_title,
+      channel_name: fetchedTranscript.channel_name,
+      duration: fetchedTranscript.duration,
       full_text: fetchedTranscript.full_text,
       segments: fetchedTranscript.segments,
       language: fetchedTranscript.language,
       source: fetchedTranscript.source
     });
 
-    // 4. Track in MongoDB (lightweight)
-    let video = await Video.findOne({ video_id });
-    if (!video) {
-      video = await Video.create({
-        video_id,
-        video_url: `https://youtube.com/watch?v=${video_id}`,
-        title: video_title,
-        channel_name,
-        duration
-      });
-    }
-    video.trackUserAccess(user._id, user.email);
-    await video.save();
-
+    // 4. Return the fresh data
     res.json({
       success: true,
       cached: false,
-      source: 'youtube',
-      transcript: {
+      source: 'external-api',
+      data: {
+        video_id: storedTranscript.video_id,
+        video_title: storedTranscript.video_title,
+        channel_name: storedTranscript.channel_name,
         full_text: storedTranscript.full_text,
         segments: storedTranscript.segments,
         language: storedTranscript.language,
@@ -262,7 +237,10 @@ router.post('/transcript/fetch', async (req, res) => {
 
   } catch (error) {
     console.error('Transcript fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch transcript' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch transcript' 
+    });
   }
 });
 
