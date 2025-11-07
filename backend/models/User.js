@@ -751,7 +751,6 @@ userSchema.index({ email: 1 });
 userSchema.index({ googleId: 1 });
 userSchema.index({ 'subscription.plan': 1 });
 userSchema.index({ 'subscription.stripe_customer_id': 1 });
-userSchema.index({ 'referral.code': 1 });
 userSchema.index({ 'timestamps.created_at': -1 });
 userSchema.index({ 'referral.code': 1 }, { 
   unique: true, 
