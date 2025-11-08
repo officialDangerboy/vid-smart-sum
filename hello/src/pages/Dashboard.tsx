@@ -145,7 +145,7 @@ const Dashboard = () => {
 
   const handleLogout = async () => {
     try {
-      await fetch(`${API_URL}/auth/logout`, {
+      await fetch(`${API_URL}/auth/revoke-all-sessions`, {
         method: 'POST',
         credentials: 'include',
         headers: getAuthHeaders()
