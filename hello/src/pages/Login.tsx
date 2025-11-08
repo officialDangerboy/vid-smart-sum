@@ -68,6 +68,23 @@ const Login = () => {
           clearInterval(pollInterval);
           setIsGoogleLoading(false);
           localStorage.removeItem('oauth_success');
+
+          const syncedAccessToken = localStorage.getItem('accessToken');
+          const syncedRefreshToken = localStorage.getItem('refreshToken');
+
+          if (syncedAccessToken && syncedRefreshToken) {
+            try {
+              window.postMessage({
+                type: 'SAVE_TOKENS',
+                accessToken: syncedAccessToken,
+                refreshToken: syncedRefreshToken
+              }, window.location.origin);
+              console.log('📤 Tokens synced to extension from login');
+            } catch (e) {
+              console.log('⚠️ Extension not installed');
+            }
+          }
+
           handleSuccessfulAuth();
         } else if (error) {
           clearInterval(pollInterval);
@@ -161,7 +178,7 @@ const Login = () => {
         clearInterval(pollInterval);
         setIsGoogleLoading(false);
         localStorage.removeItem('oauth_success');
-        
+
         toast({
           title: "Login successful!",
           description: "Loading your dashboard...",

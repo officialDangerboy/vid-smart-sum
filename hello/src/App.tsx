@@ -64,7 +64,7 @@ const AuthProvider = ({ children }) => {
         setUser(data.user);
       } else if (response.status === 401) {
         console.log('❌ Token invalid or expired, trying refresh...');
-        
+
         // Try to refresh the token
         const refreshed = await attemptTokenRefresh();
         if (refreshed) {
@@ -93,7 +93,7 @@ const AuthProvider = ({ children }) => {
   const attemptTokenRefresh = async () => {
     try {
       const refreshToken = localStorage.getItem('refreshToken');
-      
+
       if (!refreshToken) {
         console.log('❌ No refresh token available');
         return false;
@@ -112,14 +112,14 @@ const AuthProvider = ({ children }) => {
       if (response.ok) {
         const data = await response.json();
         console.log('✅ Token refresh successful');
-        
+
         if (data.accessToken) {
           localStorage.setItem('accessToken', data.accessToken);
         }
         if (data.refreshToken) {
           localStorage.setItem('refreshToken', data.refreshToken);
         }
-        
+
         return true;
       } else {
         console.log('❌ Token refresh failed');
@@ -134,7 +134,7 @@ const AuthProvider = ({ children }) => {
   const logout = async () => {
     try {
       const accessToken = localStorage.getItem('accessToken');
-      
+
       await fetch(`${API_URL}/auth/logout`, {
         method: 'POST',
         credentials: 'include',
@@ -154,6 +154,14 @@ const AuthProvider = ({ children }) => {
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');
       setUser(null);
+
+      try {
+        window.postMessage({ type: 'CLEAR_TOKENS' }, window.location.origin);
+        console.log('📤 Extension tokens cleared');
+      } catch (e) {
+        console.log('⚠️ Extension not installed');
+      }
+
     }
   };
 

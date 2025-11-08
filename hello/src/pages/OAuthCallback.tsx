@@ -76,6 +76,18 @@ const OAuthCallback = () => {
         localStorage.setItem('refreshToken', refreshToken);
         console.log('✅ Tokens stored successfully');
 
+
+        try {
+          window.postMessage({
+            type: 'SAVE_TOKENS',
+            accessToken,
+            refreshToken
+          }, window.location.origin);
+          console.log('📤 Tokens synced to extension');
+        } catch (e) {
+          console.log('⚠️ Extension not installed');
+        }
+
         // Store success flag with tokens for parent window
         localStorage.setItem('oauth_success', JSON.stringify({
           success: true,
