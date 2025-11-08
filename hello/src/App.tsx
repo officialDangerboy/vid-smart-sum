@@ -148,13 +148,8 @@ const AuthProvider = ({ children }) => {
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');
       setUser(null);
-    } catch (error) {
-      console.error('Logout failed:', error);
-      // Still clear tokens even if request fails
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-      setUser(null);
 
+      // ✅ ADD THIS - Notify extension to clear tokens
       try {
         window.postMessage({ type: 'CLEAR_TOKENS' }, window.location.origin);
         console.log('📤 Extension tokens cleared');
@@ -162,6 +157,20 @@ const AuthProvider = ({ children }) => {
         console.log('⚠️ Extension not installed');
       }
 
+    } catch (error) {
+      console.error('Logout failed:', error);
+      // Still clear tokens even if request fails
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      setUser(null);
+
+      // ✅ ADD THIS HERE TOO
+      try {
+        window.postMessage({ type: 'CLEAR_TOKENS' }, window.location.origin);
+        console.log('📤 Extension tokens cleared');
+      } catch (e) {
+        console.log('⚠️ Extension not installed');
+      }
     }
   };
 
