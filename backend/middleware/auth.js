@@ -9,7 +9,7 @@ const authenticateJWT = async (req, res, next) => {
   try {
     // Check Authorization header first (for localStorage tokens), then cookies
     let accessToken = req.headers.authorization?.replace('Bearer ', '');
-    
+
     if (!accessToken) {
       accessToken = req.cookies?.accessToken;
     }
@@ -23,7 +23,7 @@ const authenticateJWT = async (req, res, next) => {
 
     // Verify token
     const decoded = jwt.verify(accessToken, process.env.JWT_SECRET);
-    
+
     // Get user from database
     const user = await User.findById(decoded.id);
 
@@ -37,7 +37,7 @@ const authenticateJWT = async (req, res, next) => {
     // Attach user to request object
     req.user = user;
     req.userId = user._id;
-    
+
     next();
 
   } catch (error) {
@@ -70,7 +70,7 @@ const authenticateJWT = async (req, res, next) => {
 const optionalAuth = async (req, res, next) => {
   try {
     let accessToken = req.headers.authorization?.replace('Bearer ', '');
-    
+
     if (!accessToken) {
       accessToken = req.cookies?.accessToken;
     }
@@ -78,7 +78,7 @@ const optionalAuth = async (req, res, next) => {
     if (accessToken) {
       const decoded = jwt.verify(accessToken, process.env.JWT_SECRET);
       const user = await User.findById(decoded.id);
-      
+
       if (user && user.flags?.is_active) {
         req.user = user;
         req.userId = user._id;
@@ -88,7 +88,7 @@ const optionalAuth = async (req, res, next) => {
     // Silently fail for optional auth
     console.log('Optional auth failed:', error.message);
   }
-  
+
   next();
 };
 
@@ -100,22 +100,22 @@ const optionalAuth = async (req, res, next) => {
 const trackIP = async (req, res, next) => {
   // Continue the request immediately
   next();
-  
+
   // Handle IP tracking asynchronously without blocking
   if (req.user) {
     setImmediate(async () => {
       try {
         // Extract IP from headers (handles proxies, load balancers, etc.)
-        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
-                   req.headers['x-real-ip'] || 
-                   req.connection?.remoteAddress || 
-                   req.socket?.remoteAddress ||
-                   req.ip;
+        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+          req.headers['x-real-ip'] ||
+          req.connection?.remoteAddress ||
+          req.socket?.remoteAddress ||
+          req.ip;
 
         if (ip) {
           // Fetch fresh user to avoid stale data
           const user = await User.findById(req.user._id);
-          
+
           if (!user) return;
 
           // Initialize security object if it doesn't exist
@@ -140,12 +140,12 @@ const trackIP = async (req, res, next) => {
               ip: ip,
               timestamp: new Date()
             });
-            
+
             // Keep only last 50 IP addresses
             if (user.security.ip_addresses.length > 50) {
               user.security.ip_addresses = user.security.ip_addresses.slice(-50);
             }
-            
+
             console.log(`🔒 New IP tracked for user ${user.email}: ${ip}`);
           }
 
@@ -199,7 +199,7 @@ const requireRole = (allowedRoles) => {
     }
 
     const userRole = req.user.role || 'user';
-    
+
     if (!allowedRoles.includes(userRole)) {
       return res.status(403).json({
         error: 'Insufficient permissions',
@@ -224,7 +224,7 @@ const requirePlan = (requiredPlans) => {
     }
 
     const userPlan = req.user.subscription?.plan || 'free';
-    
+
     if (!requiredPlans.includes(userPlan)) {
       return res.status(403).json({
         error: 'Upgrade required',

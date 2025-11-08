@@ -69,7 +69,7 @@ function cleanupExpiredTokens() {
 async function storeRefreshToken(user, refreshToken) {
   user.security = user.security || {};
   user.security.refresh_tokens = user.security.refresh_tokens || [];
-  
+
   user.security.refresh_tokens.push({
     token: refreshToken,
     created_at: new Date(),
@@ -96,9 +96,9 @@ function isValidRefreshToken(user, refreshToken) {
 router.get('/google', (req, res, next) => {
   const csrfToken = crypto.randomBytes(32).toString('hex');
   const referralCode = req.query.ref;
-  
+
   console.log('🔗 Google Auth Init - Referral Code:', referralCode);
-  
+
   // Store referral code in CSRF token data (more reliable than session)
   csrfTokens.set(csrfToken, {
     timestamp: Date.now(),
@@ -122,17 +122,17 @@ router.get('/google', (req, res, next) => {
 });
 
 router.get('/google/callback',
-  passport.authenticate('google', { 
+  passport.authenticate('google', {
     failureRedirect: `${process.env.FRONTEND_URL}/auth/callback?error=access_denied`,
     session: false
   }),
   async (req, res) => {
     try {
       const state = req.query.state;
-      
+
       console.log('🔄 OAuth Callback - State:', state);
       console.log('👤 User:', req.user?.email);
-      
+
       // More lenient CSRF check - warn but don't block
       let referralCode = null;
       if (state && csrfTokens.has(state)) {
@@ -150,18 +150,18 @@ router.get('/google/callback',
       // Generate tokens
       const { accessToken, refreshToken } = generateTokens(req.user);
       await storeRefreshToken(req.user, refreshToken);
-      
+
       const redirectUrl = new URL(`${process.env.FRONTEND_URL}/auth/callback`);
       redirectUrl.searchParams.set('success', 'true');
       redirectUrl.searchParams.set('accessToken', accessToken);
       redirectUrl.searchParams.set('refreshToken', refreshToken);
-      
+
       // Add referral info if available
       if (referralCode) {
         redirectUrl.searchParams.set('ref', referralCode);
         console.log('✅ Referral code passed to frontend:', referralCode);
       }
-      
+
       res.redirect(redirectUrl.toString());
 
     } catch (error) {
@@ -181,7 +181,7 @@ router.post('/refresh-token', async (req, res) => {
     const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
 
     if (!refreshToken) {
-      return res.status(401).json({ 
+      return res.status(401).json({
         error: 'No refresh token provided',
         code: 'NO_REFRESH_TOKEN'
       });
@@ -190,7 +190,7 @@ router.post('/refresh-token', async (req, res) => {
     const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
 
     if (decoded.type !== 'refresh') {
-      return res.status(401).json({ 
+      return res.status(401).json({
         error: 'Invalid token type',
         code: 'INVALID_TOKEN_TYPE'
       });
@@ -199,14 +199,14 @@ router.post('/refresh-token', async (req, res) => {
     const user = await User.findById(decoded.id);
 
     if (!user || !user.flags?.is_active) {
-      return res.status(401).json({ 
+      return res.status(401).json({
         error: 'User not found or inactive',
         code: 'USER_NOT_FOUND'
       });
     }
 
     if (!isValidRefreshToken(user, refreshToken)) {
-      return res.status(401).json({ 
+      return res.status(401).json({
         error: 'Invalid or expired refresh token',
         code: 'INVALID_REFRESH_TOKEN'
       });
@@ -233,15 +233,15 @@ router.post('/refresh-token', async (req, res) => {
 
   } catch (error) {
     console.error('Token refresh error:', error);
-    
+
     if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ 
+      return res.status(401).json({
         error: 'Refresh token expired',
         code: 'TOKEN_EXPIRED'
       });
     }
 
-    res.status(401).json({ 
+    res.status(401).json({
       error: 'Invalid refresh token',
       code: 'INVALID_TOKEN'
     });
@@ -273,7 +273,7 @@ router.post('/revoke-all-sessions', authenticateJWT, async (req, res) => {
 
   } catch (error) {
     console.error('Revoke sessions error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to revoke sessions',
       code: 'REVOKE_FAILED'
     });
@@ -287,7 +287,7 @@ router.post('/revoke-all-sessions', authenticateJWT, async (req, res) => {
 router.get('/user', async (req, res) => {
   try {
     let accessToken = req.headers.authorization?.replace('Bearer ', '');
-    
+
     if (!accessToken) {
       accessToken = req.cookies?.accessToken;
     }
@@ -375,13 +375,13 @@ router.post('/logout', authenticateJWT, async (req, res) => {
 
   } catch (error) {
     console.error('Logout error:', error);
-    
+
     res.clearCookie('accessToken');
     res.clearCookie('refreshToken');
-    
-    res.json({ 
-      success: true, 
-      message: 'Logged out' 
+
+    res.json({
+      success: true,
+      message: 'Logged out'
     });
   }
 });

@@ -45,6 +45,7 @@ app.use(helmet({
 app.use(cookieParser());
 
 // CORS with credentials
+// CORS with credentials
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',')
   : [process.env.FRONTEND_URL];
@@ -54,6 +55,17 @@ app.use(cors({
     // Allow requests with no origin (mobile apps, Postman, etc.)
     if (!origin) return callback(null, true);
 
+    // Allow Chrome extensions
+    if (origin.startsWith('chrome-extension://')) {
+      return callback(null, true);
+    }
+
+    // Allow Firefox extensions
+    if (origin.startsWith('moz-extension://')) {
+      return callback(null, true);
+    }
+
+    // Check if origin is in allowed list
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
@@ -66,6 +78,9 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
   exposedHeaders: ['set-cookie']
 }));
+
+// Handle preflight requests explicitly
+app.options('*', cors());
 
 // ============================================
 // BODY PARSERS

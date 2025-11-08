@@ -202,9 +202,9 @@ router.post('/transcript/fetch', async (req, res) => {
     const fetchedTranscript = await fetchTranscriptFromYouTube(video_id);
 
     if (!fetchedTranscript) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        error: 'Transcript not available for this video' 
+        error: 'Transcript not available for this video'
       });
     }
 
@@ -238,9 +238,9 @@ router.post('/transcript/fetch', async (req, res) => {
 
   } catch (error) {
     console.error('Transcript fetch error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: 'Failed to fetch transcript' 
+      error: 'Failed to fetch transcript'
     });
   }
 });

@@ -25,33 +25,33 @@ async function processReferral(newUser, referralCode) {
     console.log('⚠️ No referral code provided');
     return null;
   }
-  
+
   console.log('🔍 Processing referral with code:', referralCode);
   console.log('👤 New user ID:', newUser._id);
   console.log('📧 New user email:', newUser.email);
-  
+
   // CRITICAL: Fetch fresh referrer data
   const referrer = await User.findOne({ 'referral.code': referralCode });
-  
+
   if (!referrer) {
     console.log('❌ Invalid referral code:', referralCode);
     return { success: false, message: 'Invalid referral code' };
   }
-  
+
   console.log('✅ Referrer found:', referrer.email);
   console.log('💰 Referrer current balance:', referrer.credits.balance);
-  
+
   if (referrer._id.toString() === newUser._id.toString()) {
     console.log('❌ User cannot refer themselves');
     return { success: false, message: 'Cannot refer yourself' };
   }
-  
+
   // Calculate credits based on referrer's current referral count
   const currentReferralCount = referrer.referral?.total_referrals || 0;
   const creditsToGive = calculateReferralCredits(currentReferralCount);
-  
+
   console.log(`💰 Credits to give: ${creditsToGive} (Referral #${currentReferralCount + 1})`);
-  
+
   // STEP 1: Update new user with referrer info
   try {
     newUser.referral = newUser.referral || {
@@ -61,21 +61,21 @@ async function processReferral(newUser, referralCode) {
       total_referrals: 0,
       total_credits_earned: 0
     };
-    
+
     newUser.referral.referred_by = {
       user_id: referrer._id,
       email: referrer.email,
       code: referralCode,
       referred_at: new Date()
     };
-    
+
     await newUser.save();
     console.log('✅ New user updated with referrer info');
   } catch (error) {
     console.error('❌ Error updating new user:', error);
     return { success: false, message: 'Failed to update new user' };
   }
-  
+
   // STEP 2: Update referrer - Add referred user to list
   try {
     referrer.referral = referrer.referral || {
@@ -84,31 +84,31 @@ async function processReferral(newUser, referralCode) {
       total_referrals: 0,
       total_credits_earned: 0
     };
-    
+
     referrer.referral.referred_users.push({
       user_id: newUser._id,
       email: newUser.email,
       signed_up_at: new Date(),
       credits_given: creditsToGive
     });
-    
+
     // Update referrer stats
     referrer.referral.total_referrals = (referrer.referral.total_referrals || 0) + 1;
     referrer.referral.total_credits_earned = (referrer.referral.total_credits_earned || 0) + creditsToGive;
-    
+
     console.log('📊 Updated referrer stats:', {
       total_referrals: referrer.referral.total_referrals,
       total_credits_earned: referrer.referral.total_credits_earned
     });
-    
+
   } catch (error) {
     console.error('❌ Error updating referrer data:', error);
   }
-  
+
   // STEP 3: Give credits to referrer using addCredits method
   try {
     const balanceBefore = referrer.credits.balance;
-    
+
     await referrer.addCredits(
       creditsToGive,
       'earned',
@@ -117,35 +117,35 @@ async function processReferral(newUser, referralCode) {
         referred_user_id: newUser._id,
         referred_user_email: newUser.email,
         referral_number: currentReferralCount + 1,
-        referral_tier: currentReferralCount === 0 ? '1st' : 
-                       currentReferralCount === 1 ? '2nd' : '3rd+'
+        referral_tier: currentReferralCount === 0 ? '1st' :
+          currentReferralCount === 1 ? '2nd' : '3rd+'
       }
     );
-    
+
     const balanceAfter = referrer.credits.balance;
-    
+
     console.log('✅ Credits added successfully!');
     console.log(`💰 Balance: ${balanceBefore} → ${balanceAfter} (+${creditsToGive})`);
     console.log('📝 Transaction logged in credit_transactions');
-    
+
   } catch (error) {
     console.error('❌ Error adding credits:', error);
-    return { 
-      success: false, 
+    return {
+      success: false,
       message: 'Failed to add credits',
-      error: error.message 
+      error: error.message
     };
   }
-  
+
   return {
     success: true,
     referrer_earned: creditsToGive,
     new_user_bonus: 0,
     referrer_email: referrer.email,
     referral_number: currentReferralCount + 1,
-    tier: currentReferralCount === 0 ? '1st (50 credits)' : 
-          currentReferralCount === 1 ? '2nd (25 credits)' : 
-          '3rd+ (15 credits)',
+    tier: currentReferralCount === 0 ? '1st (50 credits)' :
+      currentReferralCount === 1 ? '2nd (25 credits)' :
+        '3rd+ (15 credits)',
     new_balance: referrer.credits.balance
   };
 }
@@ -154,13 +154,13 @@ async function processReferral(newUser, referralCode) {
 // PASSPORT GOOGLE STRATEGY - COMPLETELY FIXED
 // ============================================
 
-module.exports = function(passport) {
+module.exports = function (passport) {
   passport.use(new GoogleStrategy({
-      clientID: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: `${process.env.BACKEND_URL}/auth/google/callback`,
-      passReqToCallback: true
-    },
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: `${process.env.BACKEND_URL}/auth/google/callback`,
+    passReqToCallback: true
+  },
     async (req, accessToken, refreshToken, profile, done) => {
       try {
         const state = req.query.state;
@@ -171,7 +171,7 @@ module.exports = function(passport) {
 
         const email = profile.emails[0].value;
         console.log('👤 Processing OAuth for:', email);
-        
+
         let user = await User.findOne({ googleId: profile.id });
 
         // ============================================
@@ -179,30 +179,30 @@ module.exports = function(passport) {
         // ============================================
         if (user) {
           console.log('✅ Existing user logged in:', email);
-          
+
           user.timestamps.last_login = new Date();
           user.timestamps.last_activity = new Date();
-          
+
           if (profile.photos && profile.photos[0]) {
             user.picture = profile.photos[0].value;
           }
-          
+
           const ipAddress = req.ip || req.connection.remoteAddress;
           user.security = user.security || {};
           user.security.last_ip_address = ipAddress;
-          
+
           // ✅ FIXED: Ensure existing users have referral codes
           if (!user.referral || !user.referral.code) {
             const newCode = `REF${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
             console.log('🔗 Generating referral code for existing user:', newCode);
-            
+
             user.referral = user.referral || {};
             user.referral.code = newCode;
             user.referral.referred_users = user.referral.referred_users || [];
             user.referral.total_referrals = user.referral.total_referrals || 0;
             user.referral.total_credits_earned = user.referral.total_credits_earned || 0;
           }
-          
+
           await user.save();
           return done(null, user);
         }
@@ -211,13 +211,13 @@ module.exports = function(passport) {
         // NEW USER - Create account
         // ============================================
         console.log('🆕 Creating new user:', email);
-        
+
         const ipAddress = req.ip || req.connection.remoteAddress;
-        
+
         // ✅ FIXED: Generate referral code IMMEDIATELY before creating user
         const newUserReferralCode = `REF${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
         console.log('🎫 Generated NEW USER referral code:', newUserReferralCode);
-        
+
         // Create user with referral code already initialized
         user = new User({
           googleId: profile.id,
@@ -250,28 +250,28 @@ module.exports = function(passport) {
         // HANDLE INCOMING REFERRAL (if new user was referred)
         // ============================================
         const incomingReferralCode = req.session?.referralCode;
-        
+
         console.log('🔗 Checking for incoming referral code:', incomingReferralCode);
-        
+
         if (incomingReferralCode) {
           try {
             console.log('🎁 Processing referral for new user...');
-            
+
             // Small delay to ensure DB write is complete
             await new Promise(resolve => setTimeout(resolve, 100));
-            
+
             // ✅ FIXED: Fetch fresh user to avoid stale data
             const freshUser = await User.findById(user._id);
-            
+
             if (!freshUser) {
               console.error('❌ Could not fetch fresh user data');
             } else {
               const result = await processReferral(freshUser, incomingReferralCode);
-              
+
               if (result && result.success) {
                 console.log('✅✅✅ Referral processed successfully! ✅✅✅');
                 console.log('📊 Referral details:', result);
-                
+
                 // Update local user instance with latest data
                 user = await User.findById(user._id);
               } else {
@@ -298,9 +298,9 @@ module.exports = function(passport) {
         // ✅ FINAL STEP: Return the latest user data
         const finalUser = await User.findById(user._id);
         console.log('🎯 Final user referral code:', finalUser.referral?.code);
-        
+
         done(null, finalUser || user);
-        
+
       } catch (error) {
         console.error('❌ OAuth Strategy Error:', error);
         console.error('Stack trace:', error.stack);
