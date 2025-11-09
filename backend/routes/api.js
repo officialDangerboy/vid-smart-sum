@@ -249,89 +249,40 @@ router.post('/transcript/fetch', async (req, res) => {
 // ============================================
 // SUMMARY ROUTES (WITH SUPABASE)
 // ============================================
+// Around line 450-490 in routes/api.js
+
 router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
   try {
     const {
       video_id,
       video_title,
       video_url,
-      video_duration, // in seconds
+      video_duration,
       channel_name,
       channel_id,
-      thumbnail_url,
-      summary_type = 'medium', // 'short', 'medium', 'detailed'
-      ai_provider = 'python_backend'
+      ai_provider = 'python_backend',
+      model_used = 'python_backend',
+      summary_length = 'medium',
+      thumbnail_url
     } = req.body;
 
     const user = req.user;
 
-    // ============================================
-    // 1. VALIDATION
-    // ============================================
-    if (!video_id) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'video_id is required' 
-      });
-    }
+    // 1. Check Supabase cache first
+    let summary = await supabaseService.getSummary(video_id, ai_provider, summary_length);
 
-    if (!['short', 'medium', 'detailed'].includes(summary_type)) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'summary_type must be short, medium, or detailed' 
-      });
-    }
-
-    // ============================================
-    // 2. CHECK USER LIMITS
-    // ============================================
-    
-    // Check if free user and video > 20 minutes
-    if (user.subscription.plan === 'free' && video_duration > 1200) { // 1200 seconds = 20 minutes
-      return res.status(403).json({
-        success: false,
-        error: 'Free users can only summarize videos up to 20 minutes. Please upgrade to Pro.',
-        limit: '20 minutes',
-        video_duration_minutes: Math.round(video_duration / 60),
-        upgrade_required: true
-      });
-    }
-
-    // Check if user can generate summary
-    const canGenerate = user.canGenerateSummary(video_duration);
-    if (!canGenerate.allowed) {
-      return res.status(403).json({
-        success: false,
-        error: canGenerate.reason,
-        credits_balance: user.credits.balance,
-        next_reset: user.credits.next_reset_at,
-        daily_limit: user.usage.limits.daily_summaries,
-        summaries_today: user.usage.summaries_today
-      });
-    }
-
-    // ============================================
-    // 3. CHECK SUPABASE CACHE
-    // ============================================
-    let cachedSummary = await supabaseService.getSummary(
-      video_id, 
-      ai_provider, 
-      summary_type
-    );
-
-    if (cachedSummary) {
-      console.log(`✅ SUMMARY CACHE HIT (Supabase) - ${summary_type}`);
+    if (summary) {
+      console.log('✅ SUMMARY CACHE HIT (Supabase)');
 
       // Update access stats
-      await supabaseService.updateSummaryAccess(video_id, ai_provider, summary_type);
+      await supabaseService.updateSummaryAccess(video_id, ai_provider, summary_length);
 
-      // Deduct credits for free users (1 credit even for cached)
+      // Deduct credits for free users
       if (user.subscription.plan === 'free') {
-        await user.deductCredits(1, `Video summary (${summary_type}, cached)`, {
+        await user.deductCredits(1, 'Video summary (cached)', {
           video_id,
           video_title,
-          cached: true,
-          summary_type
+          cached: true
         });
       }
 
@@ -343,18 +294,18 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
         video_duration,
         channel_name,
         ai_provider,
-        model_used: 'python_backend',
-        summary_length: summary_type,
+        model_used,
+        summary_length,
         credits_used: user.subscription.plan === 'free' ? 1 : 0,
         processing_time: 0,
         success: true,
         cached: true
       });
 
-      // Track in MongoDB (lightweight)
+      // ✅ FIX: Use findOne or create, then save properly
       let video = await Video.findOne({ video_id });
       if (!video) {
-        video = await Video.create({
+        video = new Video({
           video_id,
           video_url,
           title: video_title,
@@ -364,137 +315,120 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
           thumbnail_url
         });
       }
+      
+      // Now trackUserAccess will work because video is a Mongoose document
       video.trackUserAccess(user._id, user.email);
       await video.save();
 
-      // Return cached summary
       return res.json({
         success: true,
         cached: true,
         source: 'supabase',
-        summary_type,
-        summary: {
-          text: cachedSummary.text,
-          key_points: cachedSummary.key_points || [],
-          key_takeaways: cachedSummary.key_takeaways || [],
-          main_topics: cachedSummary.main_topics || [],
-          chapters: cachedSummary.chapters || [],
-          timestamps: cachedSummary.timestamps || [],
-          tags: cachedSummary.tags || [],
-          content_type: cachedSummary.content_type,
-          target_audience: cachedSummary.target_audience,
-          difficulty_level: cachedSummary.difficulty_level,
-          practical_applications: cachedSummary.practical_applications || []
-        },
+        summary: summary.text,
+        key_points: summary.key_points,
+        chapters: summary.chapters,
+        tags: summary.tags,
         video: {
-          id: cachedSummary.video_id,
-          title: cachedSummary.video_title,
-          channel: cachedSummary.channel_name,
-          duration: cachedSummary.duration
+          id: summary.video_id,
+          title: summary.video_title,
+          duration: summary.duration
         },
-        metadata: {
-          language: cachedSummary.language,
-          word_count: cachedSummary.word_count,
-          compression_stats: cachedSummary.compression_stats
-        },
-        user_stats: {
-          credits_remaining: user.credits.balance,
-          summaries_today: user.usage.summaries_today,
+        credits_remaining: user.credits.balance,
+        usage: {
           summaries_this_month: user.usage.summaries_this_month,
           total_summaries: user.usage.total_summaries
         }
       });
     }
 
-    console.log(`❌ SUMMARY CACHE MISS - Generating new ${summary_type} summary`);
+    console.log('❌ SUMMARY CACHE MISS - Generating new summary');
 
-    // ============================================
-    // 4. DEDUCT CREDITS (BEFORE GENERATION)
-    // ============================================
-    if (user.subscription.plan === 'free') {
-      await user.deductCredits(1, `Video summary (${summary_type})`, {
-        video_id,
-        video_title,
-        video_duration,
-        summary_type
+    // 2. Check if user can generate
+    const canGenerate = user.canGenerateSummary(video_duration);
+    if (!canGenerate.allowed) {
+      return res.status(403).json({
+        error: canGenerate.reason,
+        credits_balance: user.credits.balance,
+        next_reset: user.credits.next_reset_at
       });
     }
 
-    // ============================================
-    // 5. GENERATE WITH PYTHON BACKEND
-    // ============================================
-    const startTime = Date.now();
-    
-    let pythonResponse;
-    try {
-      pythonResponse = await pythonBackendService.generateSummaryFromPython(
-        video_id, 
-        summary_type
-      );
-    } catch (error) {
-      // Refund credits if generation failed
-      if (user.subscription.plan === 'free') {
-        await user.addCredits(1, 'Refund for failed summary generation');
-      }
-      
-      throw new Error(`Python backend failed: ${error.message}`);
+    // 3. Deduct credits for free users
+    if (user.subscription.plan === 'free') {
+      await user.deductCredits(1, 'Video summary generated', {
+        video_id,
+        video_title,
+        video_duration,
+        ai_provider
+      });
     }
-    
+
+    // 4. Generate with AI
+    const startTime = Date.now();
+    const aiResponse = await generateSummaryWithAI({
+      video_id,
+      video_title,
+      video_duration,
+      provider: ai_provider,
+      model: model_used,
+      length: summary_length
+    });
     const processingTime = Date.now() - startTime;
 
-    // Transform Python response
-    const transformedData = pythonBackendService.transformPythonResponse(
-      pythonResponse,
-      video_id,
-      summary_type
-    );
-
-    // ============================================
-    // 6. STORE IN SUPABASE
-    // ============================================
+    // 5. Store in Supabase
     const storedSummary = await supabaseService.storeSummary({
-      ...transformedData,
-      ai_provider,
-      model: 'python_backend',
+      video_id,
+      video_title,
+      channel_name,
       duration: video_duration,
+      ai_provider,
+      model: model_used,
+      summary_type: summary_length,  // ✅ Changed from 'length' to 'summary_type'
+      text: aiResponse.summary,
+      key_points: aiResponse.key_points || [],
+      key_takeaways: aiResponse.key_takeaways || [],
+      main_topics: aiResponse.main_topics || [],
+      chapters: aiResponse.chapters || [],
+      timestamps: aiResponse.timestamps || [],
+      tags: aiResponse.tags || [],
+      sentiment: aiResponse.sentiment,
       processing_time: processingTime,
-      tokens_used: 0,
-      cost_usd: 0,
+      tokens_used: aiResponse.tokens_used || 0,
+      cost_usd: aiResponse.cost || 0,
       generated_by_user_id: user._id.toString(),
       generated_by_user_email: user.email
     });
 
-    // ============================================
-    // 7. TRACK IN MONGODB
-    // ============================================
+    // 6. Track in MongoDB (lightweight) - ✅ FIXED
     let video = await Video.findOne({ video_id });
     if (!video) {
-      video = await Video.create({
+      // Create new video document
+      video = new Video({
         video_id,
         video_url,
-        title: video_title || transformedData.video_title,
-        channel_name: channel_name || transformedData.channel_name,
+        title: video_title,
+        channel_name,
         channel_id,
         duration: video_duration,
         thumbnail_url
       });
     }
+    
+    // Now methods will work
     video.trackUserAccess(user._id, user.email);
     video.stats.total_summaries_generated += 1;
     await video.save();
 
-    // ============================================
-    // 8. LOG USAGE
-    // ============================================
+    // 7. Log usage
     await user.logUsage({
       video_id,
-      video_title: video_title || transformedData.video_title,
+      video_title,
       video_url,
       video_duration,
-      channel_name: channel_name || transformedData.channel_name,
+      channel_name,
       ai_provider,
-      model_used: 'python_backend',
-      summary_length: summary_type,
+      model_used,
+      summary_length,
       credits_used: user.subscription.plan === 'free' ? 1 : 0,
       processing_time: processingTime,
       success: true,
@@ -504,51 +438,33 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
     user.timestamps.last_activity = new Date();
     await user.save();
 
-    // ============================================
-    // 9. RETURN RESPONSE
-    // ============================================
     res.json({
       success: true,
       cached: false,
-      source: 'python_backend',
-      summary_type,
-      summary: {
-        text: storedSummary.text,
-        key_points: storedSummary.key_points || [],
-        key_takeaways: storedSummary.key_takeaways || [],
-        main_topics: storedSummary.main_topics || [],
-        chapters: storedSummary.chapters || [],
-        timestamps: storedSummary.timestamps || [],
-        tags: storedSummary.tags || [],
-        content_type: storedSummary.content_type,
-        target_audience: storedSummary.target_audience,
-        difficulty_level: storedSummary.difficulty_level,
-        practical_applications: storedSummary.practical_applications || []
-      },
+      source: 'ai_generated',
+      summary: storedSummary.text,
+      key_points: storedSummary.key_points,
+      key_takeaways: storedSummary.key_takeaways,
+      main_topics: storedSummary.main_topics,
+      chapters: storedSummary.chapters,
+      timestamps: storedSummary.timestamps,
+      tags: storedSummary.tags,
       video: {
         id: video_id,
-        title: storedSummary.video_title,
-        channel: storedSummary.channel_name,
+        title: video_title,
         duration: video_duration
       },
-      metadata: {
-        language: storedSummary.language,
-        word_count: storedSummary.word_count,
-        compression_stats: storedSummary.compression_stats,
-        processing_time: processingTime
-      },
-      user_stats: {
-        credits_remaining: user.credits.balance,
-        summaries_today: user.usage.summaries_today,
+      credits_remaining: user.credits.balance,
+      usage: {
         summaries_this_month: user.usage.summaries_this_month,
         total_summaries: user.usage.total_summaries
-      }
+      },
+      processing_time: processingTime
     });
 
   } catch (error) {
-    console.error('❌ Summary generation error:', error);
+    console.error('Summary generation error:', error);
 
-    // Log failed attempt
     if (req.user) {
       await req.user.logUsage({
         video_id: req.body.video_id,
