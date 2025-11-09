@@ -6,7 +6,7 @@ const videoSchema = new mongoose.Schema({
   video_id: {
     type: String,
     required: true,
-    unique: true  // ✅ Only this should be unique
+    unique: true
   },
   video_url: {
     type: String,
@@ -54,16 +54,14 @@ const videoSchema = new mongoose.Schema({
     },
     ai_provider: {
       type: String,
-      enum: ['openai', 'anthropic', 'google', 'python_backend'],  // ✅ Added python_backend
+      enum: ['openai', 'anthropic', 'google', 'python_backend'],
       required: true
-      // ❌ REMOVED: unique: true - This was causing the error!
     },
     model: String,
     length: {
       type: String,
-      enum: ['short', 'medium', 'detailed'],  // ✅ Changed 'long' to 'detailed'
+      enum: ['short', 'medium', 'detailed'],
       default: 'medium'
-      // ❌ REMOVED: unique: true
     },
     language: {
       type: String,
@@ -74,14 +72,14 @@ const videoSchema = new mongoose.Schema({
       required: true
     },
     key_points: [String],
-    key_takeaways: [String],  // ✅ Added
-    main_topics: [String],     // ✅ Changed to array of strings
+    key_takeaways: [String],
+    main_topics: [String],
     chapters: [{
       title: String,
       timestamp: String,
       summary: String
     }],
-    timestamps: [{  // ✅ Added for detailed summaries
+    timestamps: [{
       time: String,
       description: String
     }],
@@ -94,7 +92,6 @@ const videoSchema = new mongoose.Schema({
     generated_at: {
       type: Date,
       default: Date.now
-      // ❌ REMOVED: unique: true
     },
     processing_time: Number,
     tokens_used: Number,
@@ -131,7 +128,6 @@ const videoSchema = new mongoose.Schema({
     last_accessed: {
       type: Date,
       default: Date.now
-      // ❌ REMOVED: unique: true
     },
     first_accessed: {
       type: Date,
@@ -142,13 +138,13 @@ const videoSchema = new mongoose.Schema({
       openai: { type: Number, default: 0 },
       anthropic: { type: Number, default: 0 },
       google: { type: Number, default: 0 },
-      python_backend: { type: Number, default: 0 }  // ✅ Added
+      python_backend: { type: Number, default: 0 }
     },
     
     by_length: {
       short: { type: Number, default: 0 },
       medium: { type: Number, default: 0 },
-      detailed: { type: Number, default: 0 }  // ✅ Changed from 'long'
+      detailed: { type: Number, default: 0 }
     }
   },
   
@@ -186,13 +182,11 @@ const videoSchema = new mongoose.Schema({
       sixMonths.setMonth(sixMonths.getMonth() + 6);
       return sixMonths;
     }
-    // ❌ REMOVED: unique: true
   },
   
   is_popular: {
     type: Boolean,
     default: false
-    // ❌ REMOVED: unique: true
   },
   is_flagged: {
     type: Boolean,
@@ -202,247 +196,286 @@ const videoSchema = new mongoose.Schema({
   timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
 });
 
-// ✅ INDEXES - Proper compound index for summaries
+// ============================================
+// INDEXES
+// ============================================
+
 videoSchema.index({ video_id: 1 });
 videoSchema.index({ channel_id: 1 });
 videoSchema.index({ 'stats.total_views': -1 });
 videoSchema.index({ 'stats.last_accessed': -1 });
-videoSchema.index({ 'summaries.ai_provider': 1, 'summaries.length': 1 });  // ✅ Compound index
+videoSchema.index({ 'summaries.ai_provider': 1, 'summaries.length': 1 });
 
-// All your existing methods remain the same...
-// (keep all the virtual fields, instance methods, static methods, and middleware)
-// Around line 450-490 in routes/api.js
+// ============================================
+// VIRTUAL FIELDS
+// ============================================
 
-router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
-  try {
-    const {
-      video_id,
-      video_title,
-      video_url,
-      video_duration,
-      channel_name,
-      channel_id,
-      ai_provider = 'python_backend',
-      model_used = 'python_backend',
-      summary_length = 'medium',
-      thumbnail_url
-    } = req.body;
-
-    const user = req.user;
-
-    // 1. Check Supabase cache first
-    let summary = await supabaseService.getSummary(video_id, ai_provider, summary_length);
-
-    if (summary) {
-      console.log('✅ SUMMARY CACHE HIT (Supabase)');
-
-      // Update access stats
-      await supabaseService.updateSummaryAccess(video_id, ai_provider, summary_length);
-
-      // Deduct credits for free users
-      if (user.subscription.plan === 'free') {
-        await user.deductCredits(1, 'Video summary (cached)', {
-          video_id,
-          video_title,
-          cached: true
-        });
-      }
-
-      // Log usage
-      await user.logUsage({
-        video_id,
-        video_title,
-        video_url,
-        video_duration,
-        channel_name,
-        ai_provider,
-        model_used,
-        summary_length,
-        credits_used: user.subscription.plan === 'free' ? 1 : 0,
-        processing_time: 0,
-        success: true,
-        cached: true
-      });
-
-      // ✅ FIX: Use findOne or create, then save properly
-      let video = await Video.findOne({ video_id });
-      if (!video) {
-        video = new Video({
-          video_id,
-          video_url,
-          title: video_title,
-          channel_name,
-          channel_id,
-          duration: video_duration,
-          thumbnail_url
-        });
-      }
-      
-      // Now trackUserAccess will work because video is a Mongoose document
-      video.trackUserAccess(user._id, user.email);
-      await video.save();
-
-      return res.json({
-        success: true,
-        cached: true,
-        source: 'supabase',
-        summary: summary.text,
-        key_points: summary.key_points,
-        chapters: summary.chapters,
-        tags: summary.tags,
-        video: {
-          id: summary.video_id,
-          title: summary.video_title,
-          duration: summary.duration
-        },
-        credits_remaining: user.credits.balance,
-        usage: {
-          summaries_this_month: user.usage.summaries_this_month,
-          total_summaries: user.usage.total_summaries
-        }
-      });
-    }
-
-    console.log('❌ SUMMARY CACHE MISS - Generating new summary');
-
-    // 2. Check if user can generate
-    const canGenerate = user.canGenerateSummary(video_duration);
-    if (!canGenerate.allowed) {
-      return res.status(403).json({
-        error: canGenerate.reason,
-        credits_balance: user.credits.balance,
-        next_reset: user.credits.next_reset_at
-      });
-    }
-
-    // 3. Deduct credits for free users
-    if (user.subscription.plan === 'free') {
-      await user.deductCredits(1, 'Video summary generated', {
-        video_id,
-        video_title,
-        video_duration,
-        ai_provider
-      });
-    }
-
-    // 4. Generate with AI
-    const startTime = Date.now();
-    const aiResponse = await generateSummaryWithAI({
-      video_id,
-      video_title,
-      video_duration,
-      provider: ai_provider,
-      model: model_used,
-      length: summary_length
-    });
-    const processingTime = Date.now() - startTime;
-
-    // 5. Store in Supabase
-    const storedSummary = await supabaseService.storeSummary({
-      video_id,
-      video_title,
-      channel_name,
-      duration: video_duration,
-      ai_provider,
-      model: model_used,
-      summary_type: summary_length,  // ✅ Changed from 'length' to 'summary_type'
-      text: aiResponse.summary,
-      key_points: aiResponse.key_points || [],
-      key_takeaways: aiResponse.key_takeaways || [],
-      main_topics: aiResponse.main_topics || [],
-      chapters: aiResponse.chapters || [],
-      timestamps: aiResponse.timestamps || [],
-      tags: aiResponse.tags || [],
-      sentiment: aiResponse.sentiment,
-      processing_time: processingTime,
-      tokens_used: aiResponse.tokens_used || 0,
-      cost_usd: aiResponse.cost || 0,
-      generated_by_user_id: user._id.toString(),
-      generated_by_user_email: user.email
-    });
-
-    // 6. Track in MongoDB (lightweight) - ✅ FIXED
-    let video = await Video.findOne({ video_id });
-    if (!video) {
-      // Create new video document
-      video = new Video({
-        video_id,
-        video_url,
-        title: video_title,
-        channel_name,
-        channel_id,
-        duration: video_duration,
-        thumbnail_url
-      });
-    }
-    
-    // Now methods will work
-    video.trackUserAccess(user._id, user.email);
-    video.stats.total_summaries_generated += 1;
-    await video.save();
-
-    // 7. Log usage
-    await user.logUsage({
-      video_id,
-      video_title,
-      video_url,
-      video_duration,
-      channel_name,
-      ai_provider,
-      model_used,
-      summary_length,
-      credits_used: user.subscription.plan === 'free' ? 1 : 0,
-      processing_time: processingTime,
-      success: true,
-      cached: false
-    });
-
-    user.timestamps.last_activity = new Date();
-    await user.save();
-
-    res.json({
-      success: true,
-      cached: false,
-      source: 'ai_generated',
-      summary: storedSummary.text,
-      key_points: storedSummary.key_points,
-      key_takeaways: storedSummary.key_takeaways,
-      main_topics: storedSummary.main_topics,
-      chapters: storedSummary.chapters,
-      timestamps: storedSummary.timestamps,
-      tags: storedSummary.tags,
-      video: {
-        id: video_id,
-        title: video_title,
-        duration: video_duration
-      },
-      credits_remaining: user.credits.balance,
-      usage: {
-        summaries_this_month: user.usage.summaries_this_month,
-        total_summaries: user.usage.total_summaries
-      },
-      processing_time: processingTime
-    });
-
-  } catch (error) {
-    console.error('Summary generation error:', error);
-
-    if (req.user) {
-      await req.user.logUsage({
-        video_id: req.body.video_id,
-        video_title: req.body.video_title,
-        success: false,
-        error_message: error.message
-      });
-    }
-
-    res.status(500).json({ 
-      success: false,
-      error: 'Summary generation failed', 
-      message: error.message 
-    });
-  }
+videoSchema.virtual('cache_efficiency').get(function() {
+  if (this.stats.total_views === 0) return 0;
+  return ((this.stats.cache_hits / this.stats.total_views) * 100).toFixed(2);
 });
 
+videoSchema.virtual('is_trending').get(function() {
+  const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  return this.stats.last_accessed > last24Hours && this.stats.total_views > 10;
+});
+
+// ============================================
+// INSTANCE METHODS
+// ============================================
+
+videoSchema.methods.getSummary = function(provider, length = 'medium') {
+  const existingSummary = this.summaries.find(s => 
+    s.ai_provider === provider && s.length === length
+  );
+  
+  if (existingSummary) {
+    this.stats.cache_hits += 1;
+    this.stats.last_accessed = new Date();
+    
+    if (this.stats.total_views > 0) {
+      this.stats.cache_hit_rate = (this.stats.cache_hits / this.stats.total_views) * 100;
+    }
+    
+    this.stats.by_provider[provider] = (this.stats.by_provider[provider] || 0) + 1;
+    this.stats.by_length[length] = (this.stats.by_length[length] || 0) + 1;
+    
+    return existingSummary;
+  }
+  
+  return null;
+};
+
+videoSchema.methods.getTranscript = function() {
+  if (this.transcript && this.transcript.full_text) {
+    return this.transcript;
+  }
+  return null;
+};
+
+videoSchema.methods.addTranscript = function(transcriptData) {
+  if (!this.transcript || !this.transcript.full_text) {
+    this.transcript = {
+      full_text: transcriptData.full_text,
+      segments: transcriptData.segments || [],
+      language: transcriptData.language || 'en',
+      word_count: transcriptData.full_text.split(/\s+/).length,
+      generated_at: new Date(),
+      source: transcriptData.source || 'youtube_auto'
+    };
+    console.log(`✅ Transcript cached for: ${this.video_id}`);
+  }
+};
+
+videoSchema.methods.addSummary = function(summaryData, userId = null, userEmail = null) {
+  const exists = this.summaries.find(s => 
+    s.ai_provider === summaryData.ai_provider && 
+    s.length === summaryData.length
+  );
+  
+  if (exists) {
+    console.log(`⚠️ Summary already exists: ${this.video_id} - ${summaryData.ai_provider} - ${summaryData.length}`);
+    return exists;
+  }
+  
+  if (userId) {
+    summaryData.generated_by = {
+      user_id: userId,
+      user_email: userEmail
+    };
+  }
+  
+  this.summaries.push(summaryData);
+  this.stats.total_summaries_generated += 1;
+  this.stats.last_accessed = new Date();
+  
+  console.log(`✅ New summary cached: ${this.video_id} - ${summaryData.ai_provider} - ${summaryData.length}`);
+  
+  return this.summaries[this.summaries.length - 1];
+};
+
+videoSchema.methods.trackUserAccess = function(userId, userEmail) {
+  const existingUser = this.accessed_by.find(u => 
+    u.user_id.toString() === userId.toString()
+  );
+  
+  if (existingUser) {
+    existingUser.access_count += 1;
+    existingUser.last_access = new Date();
+  } else {
+    this.accessed_by.push({
+      user_id: userId,
+      user_email: userEmail,
+      access_count: 1,
+      first_access: new Date(),
+      last_access: new Date()
+    });
+    this.stats.unique_users += 1;
+  }
+  
+  this.stats.total_views += 1;
+  this.stats.last_accessed = new Date();
+  
+  if (this.stats.total_views > 50) {
+    this.is_popular = true;
+  }
+};
+
+videoSchema.methods.isCacheValid = function() {
+  return new Date() < this.cache_expires_at;
+};
+
+videoSchema.methods.extendCache = function() {
+  const sixMonthsFromNow = new Date();
+  sixMonthsFromNow.setMonth(sixMonthsFromNow.getMonth() + 6);
+  this.cache_expires_at = sixMonthsFromNow;
+};
+
+// ============================================
+// STATIC METHODS
+// ============================================
+
+videoSchema.statics.getOrCreate = async function(videoData) {
+  let video = await this.findOne({ video_id: videoData.video_id });
+  
+  if (!video) {
+    video = new this({
+      video_id: videoData.video_id,
+      video_url: videoData.video_url,
+      title: videoData.title,
+      channel_name: videoData.channel_name,
+      channel_id: videoData.channel_id,
+      duration: videoData.duration,
+      thumbnail_url: videoData.thumbnail_url,
+      published_at: videoData.published_at
+    });
+    await video.save();
+    console.log(`✅ New video record created: ${videoData.video_id}`);
+  }
+  
+  return video;
+};
+
+videoSchema.statics.getCachedTranscript = async function(videoId) {
+  const video = await this.findOne({ video_id: videoId });
+  
+  if (!video || !video.isCacheValid()) {
+    return null;
+  }
+  
+  const transcript = video.getTranscript();
+  
+  if (transcript) {
+    console.log(`✅ TRANSCRIPT CACHE HIT: ${videoId}`);
+    return { video, transcript, cached: true };
+  }
+  
+  console.log(`❌ TRANSCRIPT CACHE MISS: ${videoId}`);
+  return null;
+};
+
+videoSchema.statics.getCachedSummary = async function(videoId, provider, length) {
+  const video = await this.findOne({ video_id: videoId });
+  
+  if (!video || !video.isCacheValid()) {
+    return null;
+  }
+  
+  const summary = video.getSummary(provider, length);
+  
+  if (summary) {
+    console.log(`✅ SUMMARY CACHE HIT: ${videoId} - ${provider} - ${length}`);
+    await video.save();
+    return { video, summary, cached: true };
+  }
+  
+  console.log(`❌ SUMMARY CACHE MISS: ${videoId} - ${provider} - ${length}`);
+  return null;
+};
+
+videoSchema.statics.cleanupExpiredCache = async function() {
+  const result = await this.deleteMany({
+    cache_expires_at: { $lt: new Date() }
+  });
+  
+  console.log(`🗑️ Deleted ${result.deletedCount} expired video caches`);
+  return result.deletedCount;
+};
+
+videoSchema.statics.getMostPopular = async function(limit = 10) {
+  return this.find({ is_popular: true })
+    .sort({ 'stats.total_views': -1 })
+    .limit(limit)
+    .select('video_id title channel_name stats thumbnail_url');
+};
+
+videoSchema.statics.getCacheStats = async function() {
+  const stats = await this.aggregate([
+    {
+      $group: {
+        _id: null,
+        total_videos: { $sum: 1 },
+        total_summaries: { $sum: { $size: '$summaries' } },
+        total_views: { $sum: '$stats.total_views' },
+        total_cache_hits: { $sum: '$stats.cache_hits' },
+        avg_summaries_per_video: { $avg: { $size: '$summaries' } },
+        popular_videos: {
+          $sum: { $cond: ['$is_popular', 1, 0] }
+        }
+      }
+    }
+  ]);
+  
+  if (stats.length === 0) return null;
+  
+  const data = stats[0];
+  data.overall_cache_hit_rate = data.total_views > 0 
+    ? ((data.total_cache_hits / data.total_views) * 100).toFixed(2)
+    : 0;
+  
+  return data;
+};
+
+videoSchema.statics.getTrending = async function(limit = 10) {
+  const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  
+  return this.find({
+    'stats.last_accessed': { $gte: last24Hours }
+  })
+    .sort({ 'stats.total_views': -1 })
+    .limit(limit)
+    .select('video_id title channel_name stats thumbnail_url');
+};
+
+videoSchema.statics.getByProvider = async function(provider, limit = 10) {
+  return this.find({
+    'summaries.ai_provider': provider
+  })
+    .sort({ [`stats.by_provider.${provider}`]: -1 })
+    .limit(limit)
+    .select('video_id title channel_name stats thumbnail_url');
+};
+
+// ============================================
+// MIDDLEWARE
+// ============================================
+
+videoSchema.pre('save', function(next) {
+  this.updated_at = new Date();
+  
+  if (this.is_popular && this.stats.cache_hits > 100) {
+    this.extendCache();
+  }
+  
+  next();
+});
+
+// ============================================
+// MODEL EXPORT
+// ============================================
+
 const Video = mongoose.model('Video', videoSchema);
+
 module.exports = Video;
+
+// ✅ END OF FILE - NOTHING BELOW THIS LINE!
