@@ -269,23 +269,23 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
     // 1. VALIDATION
     // ============================================
     if (!video_id) {
-      return res.status(400).json({
+      return res.status(400).json({ 
         success: false,
-        error: 'video_id is required'
+        error: 'video_id is required' 
       });
     }
 
     if (!['short', 'medium', 'detailed'].includes(summary_type)) {
-      return res.status(400).json({
+      return res.status(400).json({ 
         success: false,
-        error: 'summary_type must be short, medium, or detailed'
+        error: 'summary_type must be short, medium, or detailed' 
       });
     }
 
     // ============================================
     // 2. CHECK USER LIMITS
     // ============================================
-
+    
     // Check if free user and video > 20 minutes
     if (user.subscription.plan === 'free' && video_duration > 1200) { // 1200 seconds = 20 minutes
       return res.status(403).json({
@@ -314,8 +314,8 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
     // 3. CHECK SUPABASE CACHE
     // ============================================
     let cachedSummary = await supabaseService.getSummary(
-      video_id,
-      ai_provider,
+      video_id, 
+      ai_provider, 
       summary_type
     );
 
@@ -424,11 +424,11 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
     // 5. GENERATE WITH PYTHON BACKEND
     // ============================================
     const startTime = Date.now();
-
+    
     let pythonResponse;
     try {
       pythonResponse = await pythonBackendService.generateSummaryFromPython(
-        video_id,
+        video_id, 
         summary_type
       );
     } catch (error) {
@@ -436,10 +436,10 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
       if (user.subscription.plan === 'free') {
         await user.addCredits(1, 'Refund for failed summary generation');
       }
-
+      
       throw new Error(`Python backend failed: ${error.message}`);
     }
-
+    
     const processingTime = Date.now() - startTime;
 
     // Transform Python response
@@ -448,16 +448,6 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
       video_id,
       summary_type
     );
-
-    // ✅ FIX: Ensure main_topics are strings
-    if (transformedData.main_topics && Array.isArray(transformedData.main_topics)) {
-      transformedData.main_topics = transformedData.main_topics.map(topic => {
-        if (typeof topic === 'string') return topic;
-        if (topic.topic) return topic.topic;
-        if (topic.name) return topic.name;
-        return String(topic);
-      });
-    }
 
     // ============================================
     // 6. STORE IN SUPABASE
@@ -568,10 +558,10 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
       });
     }
 
-    res.status(500).json({
+    res.status(500).json({ 
       success: false,
-      error: 'Summary generation failed',
-      message: error.message
+      error: 'Summary generation failed', 
+      message: error.message 
     });
   }
 });
