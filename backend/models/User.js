@@ -36,6 +36,7 @@ const creditTransactionSchema = new mongoose.Schema({
   }
 }, { _id: true });
 
+// ✅ FIXED: Updated usageLogSchema
 const usageLogSchema = new mongoose.Schema({
   video_id: String,
   video_title: String,
@@ -44,18 +45,27 @@ const usageLogSchema = new mongoose.Schema({
   channel_name: String,
   ai_provider: {
     type: String,
-    enum: ['openai', 'anthropic', 'google']
+    enum: ['openai', 'anthropic', 'google', 'python_backend'],  // ✅ Added 'python_backend'
+    default: 'python_backend'
   },
-  model_used: String,
+  model_used: {
+    type: String,
+    default: 'python_backend'
+  },
   summary_length: {
     type: String,
-    enum: ['short', 'medium', 'long']
+    enum: ['short', 'medium', 'detailed'],  // ✅ Changed 'long' to 'detailed'
+    default: 'medium'
   },
   credits_used: {
     type: Number,
     default: 1
   },
   processing_time: Number,
+  cached: {  // ✅ Added cached field
+    type: Boolean,
+    default: false
+  },
   success: {
     type: Boolean,
     default: true
@@ -92,7 +102,6 @@ const referralSchema = new mongoose.Schema({
   }
 });
 
-// FIXED: IP Address schema without _id conflict
 const ipAddressSchema = new mongoose.Schema({
   ip: {
     type: String,
@@ -102,14 +111,14 @@ const ipAddressSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   }
-}, { _id: false }); // IMPORTANT: Disable auto _id generation
+}, { _id: false });
 
 // ============================================
 // MAIN USER SCHEMA
 // ============================================
 
 const userSchema = new mongoose.Schema({
-  // Basic Info - FIXED: Removed duplicate unique constraints
+  // Basic Info
   googleId: {
     type: String,
     required: true,
@@ -166,7 +175,7 @@ const userSchema = new mongoose.Schema({
     }
   },
 
-  // Subscription - FIXED: Removed unique constraints on enum fields
+  // Subscription
   subscription: {
     plan: {
       type: String,
@@ -197,12 +206,12 @@ const userSchema = new mongoose.Schema({
     stripe_customer_id: {
       type: String,
       unique: true,
-      sparse: true // Allow null values
+      sparse: true
     },
     stripe_subscription_id: {
       type: String,
       unique: true,
-      sparse: true // Allow null values
+      sparse: true
     }
   },
 
@@ -260,19 +269,19 @@ const userSchema = new mongoose.Schema({
     }
   },
 
-  // Preferences
+  // ✅ FIXED: Updated preferences
   preferences: {
     ai: {
       default_provider: {
         type: String,
-        enum: ['openai', 'anthropic', 'google'],
-        default: 'openai'
+        enum: ['openai', 'anthropic', 'google', 'python_backend'],  // ✅ Added 'python_backend'
+        default: 'python_backend'
       }
     },
     summary: {
       default_length: {
         type: String,
-        enum: ['short', 'medium', 'long'],
+        enum: ['short', 'medium', 'detailed'],  // ✅ Changed 'long' to 'detailed'
         default: 'medium'
       }
     },
@@ -314,10 +323,10 @@ const userSchema = new mongoose.Schema({
     }
   },
 
-  // Security - FIXED: Proper IP address schema
+  // Security
   security: {
     last_ip_address: String,
-    ip_addresses: [ipAddressSchema], // Use the fixed schema
+    ip_addresses: [ipAddressSchema],
     failed_login_attempts: {
       type: Number,
       default: 0
@@ -326,7 +335,7 @@ const userSchema = new mongoose.Schema({
     account_locked_until: Date
   },
 
-  // Flags - FIXED: Removed unique constraints
+  // Flags
   flags: {
     is_active: {
       type: Boolean,
@@ -375,7 +384,7 @@ const userSchema = new mongoose.Schema({
     }
   }
 }, {
-  timestamps: false, // We manage timestamps manually
+  timestamps: false,
   collection: 'users'
 });
 
@@ -396,7 +405,6 @@ userSchema.virtual('credit_percentage').get(function() {
 // INSTANCE METHODS
 // ============================================
 
-// Add credits
 userSchema.methods.addCredits = async function(amount, type = 'earned', description = '', metadata = {}) {
   this.credits.balance += amount;
   this.credits.lifetime_earned += amount;
@@ -413,7 +421,6 @@ userSchema.methods.addCredits = async function(amount, type = 'earned', descript
     metadata
   });
   
-  // Keep only last 500 transactions
   if (this.credit_transactions.length > 500) {
     this.credit_transactions = this.credit_transactions.slice(-500);
   }
@@ -422,7 +429,6 @@ userSchema.methods.addCredits = async function(amount, type = 'earned', descript
   return this.credits.balance;
 };
 
-// Deduct credits
 userSchema.methods.deductCredits = async function(amount, description = '', metadata = {}) {
   if (this.credits.balance < amount) {
     throw new Error('Insufficient credits');
@@ -443,9 +449,7 @@ userSchema.methods.deductCredits = async function(amount, description = '', meta
   return this.credits.balance;
 };
 
-// Check if user can generate summary
 userSchema.methods.canGenerateSummary = function(videoDuration = 0) {
-  // Check account status first
   if (this.flags.is_banned) {
     return { allowed: false, reason: 'Account is banned' };
   }
@@ -454,7 +458,6 @@ userSchema.methods.canGenerateSummary = function(videoDuration = 0) {
     return { allowed: false, reason: 'Account is inactive' };
   }
   
-  // Premium users - unlimited access, skip all checks
   if (this.is_premium) {
     return { 
       allowed: true, 
@@ -463,9 +466,6 @@ userSchema.methods.canGenerateSummary = function(videoDuration = 0) {
     };
   }
   
-  // === FREE USER CHECKS BELOW ===
-  
-  // Check credits
   if (this.credits.balance < 1) {
     return { 
       allowed: false, 
@@ -475,7 +475,6 @@ userSchema.methods.canGenerateSummary = function(videoDuration = 0) {
     };
   }
   
-  // Check daily limit
   if (this.usage.summaries_today >= this.usage.limits.daily_summaries) {
     return { 
       allowed: false, 
@@ -486,7 +485,6 @@ userSchema.methods.canGenerateSummary = function(videoDuration = 0) {
     };
   }
   
-  // Check video duration limit
   if (videoDuration > this.usage.limits.video_duration_seconds) {
     const maxMinutes = Math.floor(this.usage.limits.video_duration_seconds / 60);
     return { 
@@ -497,7 +495,6 @@ userSchema.methods.canGenerateSummary = function(videoDuration = 0) {
     };
   }
   
-  // All checks passed for free user
   return { 
     allowed: true, 
     reason: 'Access granted',
@@ -506,7 +503,7 @@ userSchema.methods.canGenerateSummary = function(videoDuration = 0) {
   };
 };
 
-// Log usage
+// ✅ FIXED: Updated logUsage to accept cached parameter
 userSchema.methods.logUsage = async function(usageData) {
   this.usage.summaries_today += 1;
   this.usage.summaries_this_month += 1;
@@ -518,9 +515,24 @@ userSchema.methods.logUsage = async function(usageData) {
     this.usage.total_time_saved += Math.floor(usageData.video_duration / 60);
   }
   
-  this.usage_logs.push(usageData);
+  // Ensure all required fields have defaults
+  this.usage_logs.push({
+    video_id: usageData.video_id,
+    video_title: usageData.video_title,
+    video_url: usageData.video_url,
+    video_duration: usageData.video_duration,
+    channel_name: usageData.channel_name,
+    ai_provider: usageData.ai_provider || 'python_backend',
+    model_used: usageData.model_used || 'python_backend',
+    summary_length: usageData.summary_length || 'medium',
+    credits_used: usageData.credits_used || 0,
+    processing_time: usageData.processing_time,
+    cached: usageData.cached || false,  // ✅ Added cached field
+    success: usageData.success !== undefined ? usageData.success : true,
+    error_message: usageData.error_message,
+    timestamp: new Date()
+  });
   
-  // Keep only last 1000 logs
   if (this.usage_logs.length > 1000) {
     this.usage_logs = this.usage_logs.slice(-1000);
   }
@@ -530,7 +542,6 @@ userSchema.methods.logUsage = async function(usageData) {
   await this.save();
 };
 
-// Reset monthly credits
 userSchema.methods.resetMonthlyCredits = async function() {
   if (this.subscription.plan === 'free') {
     const now = new Date();
@@ -555,7 +566,6 @@ userSchema.methods.resetMonthlyCredits = async function() {
   }
 };
 
-// Upgrade or downgrade subscription
 userSchema.methods.upgradeSubscription = async function(plan, billingCycle, stripeData = {}) {
   const previousPlan = this.subscription.plan;
   
@@ -577,10 +587,8 @@ userSchema.methods.upgradeSubscription = async function(plan, billingCycle, stri
     this.subscription.current_period_end = stripeData.currentPeriodEnd;
   }
   
-  // Update features and limits based on new plan
   this.updateFeatureAccess();
   
-  // Add transaction log
   this.credit_transactions.push({
     type: 'admin_adjustment',
     amount: 0,
@@ -602,39 +610,33 @@ userSchema.methods.upgradeSubscription = async function(plan, billingCycle, stri
   };
 };
 
-// Update features based on subscription plan
 userSchema.methods.updateFeatureAccess = function() {
   const plan = this.subscription.plan;
   
   if (plan === 'free') {
-    // Free plan - limited features
     this.features.unlimited_summaries = false;
     this.features.unlimited_video_length = false;
     this.features.premium_ai_models = false;
     this.features.export_summaries = false;
     this.features.priority_support = false;
     
-    // Reset limits for free users
     this.usage.limits.daily_summaries = 10;
     this.usage.limits.monthly_summaries = 300;
-    this.usage.limits.video_duration_seconds = 1200; // 20 minutes
+    this.usage.limits.video_duration_seconds = 1200;
     
   } else if (plan === 'pro') {
-    // Pro plan - all features enabled
     this.features.unlimited_summaries = true;
     this.features.unlimited_video_length = true;
     this.features.premium_ai_models = true;
     this.features.export_summaries = true;
     this.features.priority_support = true;
     
-    // Remove limits for premium users
-    this.usage.limits.daily_summaries = 999999; // Effectively unlimited
+    this.usage.limits.daily_summaries = 999999;
     this.usage.limits.monthly_summaries = 999999;
-    this.usage.limits.video_duration_seconds = 999999; // No duration limit
+    this.usage.limits.video_duration_seconds = 999999;
   }
 };
 
-// Cancel subscription (downgrade to free at period end)
 userSchema.methods.cancelSubscription = async function() {
   this.subscription.cancel_at_period_end = true;
   this.subscription.cancelled_at = new Date();
@@ -659,9 +661,7 @@ userSchema.methods.cancelSubscription = async function() {
   };
 };
 
-// Generate referral code - FIXED: Prevent parallel save errors
 userSchema.methods.generateReferralCode = async function() {
-  // ✅ If code already exists, return it immediately (prevents regeneration)
   if (this.referral && this.referral.code) {
     console.log('📌 Referral code already exists:', this.referral.code);
     return this.referral.code;
@@ -669,10 +669,8 @@ userSchema.methods.generateReferralCode = async function() {
 
   console.log('🔄 Generating new referral code for user:', this._id);
 
-  // Generate a unique code
   const newCode = `REF${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
 
-  // ✅ CRITICAL: Use atomic findOneAndUpdate to prevent race conditions
   try {
     const updated = await mongoose.model('User').findOneAndUpdate(
       {
@@ -692,20 +690,18 @@ userSchema.methods.generateReferralCode = async function() {
         }
       },
       {
-        new: true,  // Return updated document
+        new: true,
         runValidators: true
       }
     );
 
     if (updated && updated.referral && updated.referral.code) {
-      // Success - update local instance
       this.referral = this.referral || {};
       this.referral.code = updated.referral.code;
       console.log('✅ Referral code generated and saved:', updated.referral.code);
       return updated.referral.code;
     }
 
-    // Code was already set by another process - fetch and return it
     console.log('⚠️ Code already set by another process, fetching...');
     const freshUser = await mongoose.model('User').findById(this._id);
     
@@ -716,14 +712,12 @@ userSchema.methods.generateReferralCode = async function() {
       return freshUser.referral.code;
     }
 
-    // Fallback - should never reach here
     console.error('❌ Failed to generate or fetch referral code');
     return null;
 
   } catch (error) {
     console.error('❌ Error in generateReferralCode:', error);
     
-    // On error, try to fetch existing code
     const freshUser = await mongoose.model('User').findById(this._id);
     if (freshUser && freshUser.referral && freshUser.referral.code) {
       this.referral.code = freshUser.referral.code;
