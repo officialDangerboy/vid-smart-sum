@@ -48,6 +48,27 @@ async function generateSummaryFromPython(videoId, summaryType = 'medium') {
 function transformPythonResponse(pythonData, videoId, summaryType) {
   const summary = pythonData.summary_data;
   
+  // Handle different text formats
+  let summaryText = '';
+  if (summaryType === 'detailed') {
+    summaryText = summary.detailed_summary || summary.executive_summary || summary.summary;
+  } else {
+    summaryText = summary.summary || summary.detailed_summary || summary.executive_summary;
+  }
+  
+  // Handle main_topics (can be string array or object array)
+  let mainTopics = [];
+  if (Array.isArray(summary.main_topics)) {
+    mainTopics = summary.main_topics.map(topic => {
+      if (typeof topic === 'string') return topic;
+      if (typeof topic === 'object' && topic.topic) return topic.topic;
+      return '';
+    }).filter(Boolean);
+  } else if (summary.main_topic) {
+    // For SHORT summaries with singular main_topic
+    mainTopics = [summary.main_topic];
+  }
+  
   return {
     video_id: videoId,
     video_title: pythonData.video_title,
@@ -56,25 +77,28 @@ function transformPythonResponse(pythonData, videoId, summaryType) {
     word_count: pythonData.metadata?.word_count,
     
     // Core summary data
-    text: summary.summary || summary.detailed_summary || summary.executive_summary,
+    text: summaryText,
     summary_type: summaryType,
     
-    // Different fields based on summary type
+    // Key fields
     key_points: summary.key_points || [],
     key_takeaways: summary.key_takeaways || [],
-    main_topics: summary.main_topics || [],
-    main_topic: summary.main_topic,
+    main_topics: mainTopics,
     
     // Additional metadata
-    content_type: summary.content_type,
-    target_audience: summary.target_audience,
-    duration_estimate: summary.duration_estimate,
-    difficulty_level: summary.difficulty_level,
-    prerequisites: summary.prerequisites,
+    content_type: summary.content_type || null,
+    target_audience: summary.target_audience || null,
+    duration_estimate: summary.duration_estimate || null,
+    difficulty_level: summary.difficulty_level || null,
+    prerequisites: summary.prerequisites || null,
     
     // Detailed summary specific
     timestamps: summary.timestamps || [],
     practical_applications: summary.practical_applications || [],
+    
+    // Currently unused but should be populated
+    chapters: [], // TODO: Implement chapter extraction
+    tags: [],     // TODO: Implement tag generation
     
     // Compression stats
     compression_stats: pythonData.compression_stats || {},
