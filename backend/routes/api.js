@@ -7,6 +7,7 @@ const supabaseService = require('../services/supabaseService');
 
 // Import JWT middleware (NOT session-based)
 const { authenticateJWT, trackIP } = require('../middleware/auth');
+const pythonBackendService = require('../services/pythonBackendService');
 
 // Encryption helper functions
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.randomBytes(32);
@@ -248,80 +249,89 @@ router.post('/transcript/fetch', async (req, res) => {
 // ============================================
 // SUMMARY ROUTES (WITH SUPABASE)
 // ============================================
-
-router.post('/summary/check-cache', authenticateJWT, async (req, res) => {
-  try {
-    const { video_id, ai_provider = 'openai', length = 'medium' } = req.body;
-
-    // Check Supabase first
-    const cachedSummary = await supabaseService.getSummary(video_id, ai_provider, length);
-
-    if (cachedSummary) {
-      // Update access stats
-      await supabaseService.updateSummaryAccess(video_id, ai_provider, length);
-
-      return res.json({
-        success: true,
-        cached: true,
-        source: 'supabase',
-        video: {
-          id: cachedSummary.video_id,
-          title: cachedSummary.video_title,
-          duration: cachedSummary.duration
-        },
-        summary: {
-          text: cachedSummary.text,
-          key_points: cachedSummary.key_points,
-          chapters: cachedSummary.chapters,
-          tags: cachedSummary.tags,
-          sentiment: cachedSummary.sentiment
-        }
-      });
-    }
-
-    res.json({
-      success: true,
-      cached: false,
-      message: 'No cached summary found'
-    });
-  } catch (error) {
-    console.error('Summary cache check error:', error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
 router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
   try {
     const {
       video_id,
       video_title,
       video_url,
-      video_duration,
+      video_duration, // in seconds
       channel_name,
       channel_id,
-      ai_provider = 'openai',
-      model_used = 'gpt-4',
-      summary_length = 'medium',
-      thumbnail_url
+      thumbnail_url,
+      summary_type = 'medium', // 'short', 'medium', 'detailed'
+      ai_provider = 'python_backend'
     } = req.body;
 
     const user = req.user;
 
-    // 1. Check Supabase cache first
-    let summary = await supabaseService.getSummary(video_id, ai_provider, summary_length);
+    // ============================================
+    // 1. VALIDATION
+    // ============================================
+    if (!video_id) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'video_id is required' 
+      });
+    }
 
-    if (summary) {
-      console.log('✅ SUMMARY CACHE HIT (Supabase)');
+    if (!['short', 'medium', 'detailed'].includes(summary_type)) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'summary_type must be short, medium, or detailed' 
+      });
+    }
+
+    // ============================================
+    // 2. CHECK USER LIMITS
+    // ============================================
+    
+    // Check if free user and video > 20 minutes
+    if (user.subscription.plan === 'free' && video_duration > 1200) { // 1200 seconds = 20 minutes
+      return res.status(403).json({
+        success: false,
+        error: 'Free users can only summarize videos up to 20 minutes. Please upgrade to Pro.',
+        limit: '20 minutes',
+        video_duration_minutes: Math.round(video_duration / 60),
+        upgrade_required: true
+      });
+    }
+
+    // Check if user can generate summary
+    const canGenerate = user.canGenerateSummary(video_duration);
+    if (!canGenerate.allowed) {
+      return res.status(403).json({
+        success: false,
+        error: canGenerate.reason,
+        credits_balance: user.credits.balance,
+        next_reset: user.credits.next_reset_at,
+        daily_limit: user.usage.limits.daily_summaries,
+        summaries_today: user.usage.summaries_today
+      });
+    }
+
+    // ============================================
+    // 3. CHECK SUPABASE CACHE
+    // ============================================
+    let cachedSummary = await supabaseService.getSummary(
+      video_id, 
+      ai_provider, 
+      summary_type
+    );
+
+    if (cachedSummary) {
+      console.log(`✅ SUMMARY CACHE HIT (Supabase) - ${summary_type}`);
 
       // Update access stats
-      await supabaseService.updateSummaryAccess(video_id, ai_provider, summary_length);
+      await supabaseService.updateSummaryAccess(video_id, ai_provider, summary_type);
 
-      // Deduct credits for free users
+      // Deduct credits for free users (1 credit even for cached)
       if (user.subscription.plan === 'free') {
-        await user.deductCredits(1, 'Video summary (cached)', {
+        await user.deductCredits(1, `Video summary (${summary_type}, cached)`, {
           video_id,
           video_title,
-          cached: true
+          cached: true,
+          summary_type
         });
       }
 
@@ -333,11 +343,12 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
         video_duration,
         channel_name,
         ai_provider,
-        model_used,
-        summary_length,
+        model_used: 'python_backend',
+        summary_length: summary_type,
         credits_used: user.subscription.plan === 'free' ? 1 : 0,
         processing_time: 0,
-        success: true
+        success: true,
+        cached: true
       });
 
       // Track in MongoDB (lightweight)
@@ -356,90 +367,113 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
       video.trackUserAccess(user._id, user.email);
       await video.save();
 
+      // Return cached summary
       return res.json({
         success: true,
         cached: true,
         source: 'supabase',
-        summary: summary.text,
-        key_points: summary.key_points,
-        chapters: summary.chapters,
-        tags: summary.tags,
-        video: {
-          id: summary.video_id,
-          title: summary.video_title,
-          duration: summary.duration
+        summary_type,
+        summary: {
+          text: cachedSummary.text,
+          key_points: cachedSummary.key_points || [],
+          key_takeaways: cachedSummary.key_takeaways || [],
+          main_topics: cachedSummary.main_topics || [],
+          chapters: cachedSummary.chapters || [],
+          timestamps: cachedSummary.timestamps || [],
+          tags: cachedSummary.tags || [],
+          content_type: cachedSummary.content_type,
+          target_audience: cachedSummary.target_audience,
+          difficulty_level: cachedSummary.difficulty_level,
+          practical_applications: cachedSummary.practical_applications || []
         },
-        credits_remaining: user.credits.balance,
-        usage: {
+        video: {
+          id: cachedSummary.video_id,
+          title: cachedSummary.video_title,
+          channel: cachedSummary.channel_name,
+          duration: cachedSummary.duration
+        },
+        metadata: {
+          language: cachedSummary.language,
+          word_count: cachedSummary.word_count,
+          compression_stats: cachedSummary.compression_stats
+        },
+        user_stats: {
+          credits_remaining: user.credits.balance,
+          summaries_today: user.usage.summaries_today,
           summaries_this_month: user.usage.summaries_this_month,
           total_summaries: user.usage.total_summaries
         }
       });
     }
 
-    console.log('❌ SUMMARY CACHE MISS - Generating new summary');
+    console.log(`❌ SUMMARY CACHE MISS - Generating new ${summary_type} summary`);
 
-    // 2. Check if user can generate
-    const canGenerate = user.canGenerateSummary(video_duration);
-    if (!canGenerate.allowed) {
-      return res.status(403).json({
-        error: canGenerate.reason,
-        credits_balance: user.credits.balance,
-        next_reset: user.credits.next_reset_at
-      });
-    }
-
-    // 3. Deduct credits for free users
+    // ============================================
+    // 4. DEDUCT CREDITS (BEFORE GENERATION)
+    // ============================================
     if (user.subscription.plan === 'free') {
-      await user.deductCredits(1, 'Video summary generated', {
+      await user.deductCredits(1, `Video summary (${summary_type})`, {
         video_id,
         video_title,
         video_duration,
-        ai_provider
+        summary_type
       });
     }
 
-    // 4. Generate with AI
+    // ============================================
+    // 5. GENERATE WITH PYTHON BACKEND
+    // ============================================
     const startTime = Date.now();
-    const aiResponse = await generateSummaryWithAI({
-      video_id,
-      video_title,
-      video_duration,
-      provider: ai_provider,
-      model: model_used,
-      length: summary_length
-    });
+    
+    let pythonResponse;
+    try {
+      pythonResponse = await pythonBackendService.generateSummaryFromPython(
+        video_id, 
+        summary_type
+      );
+    } catch (error) {
+      // Refund credits if generation failed
+      if (user.subscription.plan === 'free') {
+        await user.addCredits(1, 'Refund for failed summary generation');
+      }
+      
+      throw new Error(`Python backend failed: ${error.message}`);
+    }
+    
     const processingTime = Date.now() - startTime;
 
-    // 5. Store in Supabase
-    const storedSummary = await supabaseService.storeSummary({
+    // Transform Python response
+    const transformedData = pythonBackendService.transformPythonResponse(
+      pythonResponse,
       video_id,
-      video_title,
-      channel_name,
-      duration: video_duration,
+      summary_type
+    );
+
+    // ============================================
+    // 6. STORE IN SUPABASE
+    // ============================================
+    const storedSummary = await supabaseService.storeSummary({
+      ...transformedData,
       ai_provider,
-      model: model_used,
-      length: summary_length,
-      text: aiResponse.summary,
-      key_points: aiResponse.key_points || [],
-      chapters: aiResponse.chapters || [],
-      tags: aiResponse.tags || [],
-      sentiment: aiResponse.sentiment,
+      model: 'python_backend',
+      duration: video_duration,
       processing_time: processingTime,
-      tokens_used: aiResponse.tokens_used || 0,
-      cost_usd: aiResponse.cost || 0,
+      tokens_used: 0,
+      cost_usd: 0,
       generated_by_user_id: user._id.toString(),
       generated_by_user_email: user.email
     });
 
-    // 6. Track in MongoDB (lightweight)
+    // ============================================
+    // 7. TRACK IN MONGODB
+    // ============================================
     let video = await Video.findOne({ video_id });
     if (!video) {
       video = await Video.create({
         video_id,
         video_url,
-        title: video_title,
-        channel_name,
+        title: video_title || transformedData.video_title,
+        channel_name: channel_name || transformedData.channel_name,
         channel_id,
         duration: video_duration,
         thumbnail_url
@@ -449,48 +483,72 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
     video.stats.total_summaries_generated += 1;
     await video.save();
 
-    // 7. Log usage
+    // ============================================
+    // 8. LOG USAGE
+    // ============================================
     await user.logUsage({
       video_id,
-      video_title,
+      video_title: video_title || transformedData.video_title,
       video_url,
       video_duration,
-      channel_name,
+      channel_name: channel_name || transformedData.channel_name,
       ai_provider,
-      model_used,
-      summary_length,
+      model_used: 'python_backend',
+      summary_length: summary_type,
       credits_used: user.subscription.plan === 'free' ? 1 : 0,
       processing_time: processingTime,
-      success: true
+      success: true,
+      cached: false
     });
 
     user.timestamps.last_activity = new Date();
     await user.save();
 
+    // ============================================
+    // 9. RETURN RESPONSE
+    // ============================================
     res.json({
       success: true,
       cached: false,
-      source: 'ai_generated',
-      summary: storedSummary.text,
-      key_points: storedSummary.key_points,
-      chapters: storedSummary.chapters,
-      tags: storedSummary.tags,
+      source: 'python_backend',
+      summary_type,
+      summary: {
+        text: storedSummary.text,
+        key_points: storedSummary.key_points || [],
+        key_takeaways: storedSummary.key_takeaways || [],
+        main_topics: storedSummary.main_topics || [],
+        chapters: storedSummary.chapters || [],
+        timestamps: storedSummary.timestamps || [],
+        tags: storedSummary.tags || [],
+        content_type: storedSummary.content_type,
+        target_audience: storedSummary.target_audience,
+        difficulty_level: storedSummary.difficulty_level,
+        practical_applications: storedSummary.practical_applications || []
+      },
       video: {
         id: video_id,
-        title: video_title,
+        title: storedSummary.video_title,
+        channel: storedSummary.channel_name,
         duration: video_duration
       },
-      credits_remaining: user.credits.balance,
-      usage: {
+      metadata: {
+        language: storedSummary.language,
+        word_count: storedSummary.word_count,
+        compression_stats: storedSummary.compression_stats,
+        processing_time: processingTime
+      },
+      user_stats: {
+        credits_remaining: user.credits.balance,
+        summaries_today: user.usage.summaries_today,
         summaries_this_month: user.usage.summaries_this_month,
         total_summaries: user.usage.total_summaries
-      },
-      processing_time: processingTime
+      }
     });
 
   } catch (error) {
-    console.error('Summary generation error:', error);
+    console.error('❌ Summary generation error:', error);
 
+    // Log failed attempt
     if (req.user) {
       await req.user.logUsage({
         video_id: req.body.video_id,
@@ -500,7 +558,11 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
       });
     }
 
-    res.status(500).json({ error: 'Summary generation failed', message: error.message });
+    res.status(500).json({ 
+      success: false,
+      error: 'Summary generation failed', 
+      message: error.message 
+    });
   }
 });
 

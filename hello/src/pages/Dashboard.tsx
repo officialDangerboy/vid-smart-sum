@@ -682,7 +682,7 @@ const Dashboard = () => {
                     <div className="text-center">
                       <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Lifetime</p>
                       <p className="text-base sm:text-lg font-semibold">
-                        {userData.credits?.lifetime_earned || 0}
+                        {userData.credits?.lifetime_earned || 0} 
                       </p>
                     </div>
                     <div className="text-center">

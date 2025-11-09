@@ -116,31 +116,27 @@ async function updateTranscriptAccess(videoId) {
 // ============================================
 // VIDEO SUMMARY OPERATIONS
 // ============================================
-
-/**
- * Check if summary exists in Supabase
- */
-async function getSummary(videoId, aiProvider, length = 'medium') {
+async function getSummary(videoId, aiProvider, summaryType = 'medium') {
   try {
-    console.log(`🔍 Checking Supabase for summary: ${videoId} - ${aiProvider} - ${length}`);
+    console.log(`🔍 Checking Supabase for summary: ${videoId} - ${aiProvider} - ${summaryType}`);
     
     const { data, error } = await supabase
       .from('video_summaries')
       .select('*')
       .eq('video_id', videoId)
       .eq('ai_provider', aiProvider)
-      .eq('length', length)
+      .eq('summary_type', summaryType)
       .single();
     
     if (error) {
       if (error.code === 'PGRST116') {
-        console.log(`❌ Summary not found in Supabase: ${videoId}`);
+        console.log(`❌ Summary not found in Supabase: ${videoId} - ${summaryType}`);
         return null;
       }
       throw error;
     }
     
-    console.log(`✅ Summary found in Supabase: ${videoId} - ${aiProvider} - ${length}`);
+    console.log(`✅ Summary found in Supabase: ${videoId} - ${aiProvider} - ${summaryType}`);
     return data;
   } catch (error) {
     console.error('Supabase getSummary error:', error);
@@ -149,7 +145,7 @@ async function getSummary(videoId, aiProvider, length = 'medium') {
 }
 
 /**
- * Store summary in Supabase
+ * Store summary in Supabase (updated for new structure)
  */
 async function storeSummary(summaryData) {
   try {
@@ -160,12 +156,23 @@ async function storeSummary(summaryData) {
       duration,
       ai_provider,
       model,
-      length = 'medium',
+      summary_type = 'medium',
       language = 'en',
       text,
       key_points = [],
+      key_takeaways = [],
       chapters = [],
       tags = [],
+      main_topics = [],
+      content_type,
+      target_audience,
+      duration_estimate,
+      main_topic,
+      timestamps = [],
+      practical_applications = [],
+      prerequisites,
+      difficulty_level,
+      compression_stats = {},
       sentiment,
       word_count,
       processing_time,
@@ -175,7 +182,7 @@ async function storeSummary(summaryData) {
       generated_by_user_email
     } = summaryData;
     
-    console.log(`💾 Storing summary in Supabase: ${video_id} - ${ai_provider} - ${length}`);
+    console.log(`💾 Storing summary in Supabase: ${video_id} - ${ai_provider} - ${summary_type}`);
     
     const { data, error } = await supabase
       .from('video_summaries')
@@ -186,12 +193,23 @@ async function storeSummary(summaryData) {
         duration,
         ai_provider,
         model,
-        length,
+        summary_type,
         language,
         text,
         key_points,
+        key_takeaways,
         chapters,
         tags,
+        main_topics,
+        content_type,
+        target_audience,
+        duration_estimate,
+        main_topic,
+        timestamps,
+        practical_applications,
+        prerequisites,
+        difficulty_level,
+        compression_stats,
         sentiment,
         word_count: word_count || (text ? text.split(/\s+/).length : 0),
         processing_time,
@@ -203,7 +221,7 @@ async function storeSummary(summaryData) {
         last_accessed: new Date().toISOString(),
         access_count: 1
       }, {
-        onConflict: 'video_id,ai_provider,length',
+        onConflict: 'video_id,ai_provider,summary_type',
         ignoreDuplicates: false
       })
       .select()
@@ -211,7 +229,7 @@ async function storeSummary(summaryData) {
     
     if (error) throw error;
     
-    console.log(`✅ Summary stored in Supabase: ${video_id}`);
+    console.log(`✅ Summary stored in Supabase: ${video_id} - ${summary_type}`);
     return data;
   } catch (error) {
     console.error('Supabase storeSummary error:', error);
@@ -222,21 +240,31 @@ async function storeSummary(summaryData) {
 /**
  * Update summary access stats
  */
-async function updateSummaryAccess(videoId, aiProvider, length) {
+async function updateSummaryAccess(videoId, aiProvider, summaryType) {
   try {
+    // First get current count
+    const { data: current } = await supabase
+      .from('video_summaries')
+      .select('access_count')
+      .eq('video_id', videoId)
+      .eq('ai_provider', aiProvider)
+      .eq('summary_type', summaryType)
+      .single();
+    
+    // Then update
     const { error } = await supabase
       .from('video_summaries')
       .update({
         last_accessed: new Date().toISOString(),
-        access_count: supabase.raw('access_count + 1')
+        access_count: (current?.access_count || 0) + 1
       })
       .eq('video_id', videoId)
       .eq('ai_provider', aiProvider)
-      .eq('length', length);
+      .eq('summary_type', summaryType);
     
     if (error) throw error;
     
-    console.log(`📊 Updated summary access: ${videoId}`);
+    console.log(`📊 Updated summary access: ${videoId} - ${summaryType}`);
   } catch (error) {
     console.error('Update summary access error:', error);
   }
