@@ -1,7 +1,7 @@
 import { useLocation } from "react-router-dom";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Home, Search, ArrowLeft, Sparkles } from "lucide-react";
+import { Home } from "lucide-react";
 
 const NotFound = () => {
   const location = useLocation();
@@ -19,11 +19,7 @@ const NotFound = () => {
       
       <div className="container mx-auto px-4 sm:px-6 relative z-10">
         <div className="text-center max-w-2xl mx-auto">
-          {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-primary/30 mb-6 bg-primary/5">
-            <Sparkles className="w-4 h-4 text-primary" />
-            <span className="text-sm font-medium text-primary">Error 404</span>
-          </div>
+
 
           {/* Main heading */}
           <h1 className="text-7xl sm:text-8xl md:text-9xl font-bold mb-6 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
@@ -38,24 +34,15 @@ const NotFound = () => {
             Oops! The page you're looking for doesn't exist. It might have been moved or deleted.
           </p>
 
-          {/* Action buttons */}
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-12">
+          {/* Action button */}
+          <div className="flex justify-center mb-8">
             <Button
               onClick={() => window.location.href = "/"}
-              className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-all duration-300 w-full sm:w-auto"
+              className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-all duration-300"
               size="lg"
             >
               <Home className="w-5 h-5 mr-2" />
               Back to Home
-            </Button>
-            
-            <Button
-              onClick={() => window.history.back()}
-              className="bg-background/50 border border-border/50 hover:bg-primary/10 hover:border-primary/30 transition-all duration-300 w-full sm:w-auto"
-              size="lg"
-            >
-              <ArrowLeft className="w-5 h-5 mr-2" />
-              Go Back
             </Button>
           </div>
 
