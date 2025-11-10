@@ -3,11 +3,12 @@ import { Menu, X, Moon, Sun } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { GiBrain } from "react-icons/gi";
+import { useAuth } from "../App";
 
 const Navbar = () => {
+  const { user } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
-  const [activeSection, setActiveSection] = useState("");
   const [isDark, setIsDark] = useState(true);
 
   // Initialize theme from localStorage or default to dark
@@ -34,19 +35,6 @@ const Navbar = () => {
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 20);
-      
-      // Track active section for navigation highlighting
-      const sections = ["how-it-works", "pricing", "faq"];
-      const current = sections.find(section => {
-        const element = document.getElementById(section);
-        if (element) {
-          const rect = element.getBoundingClientRect();
-          return rect.top <= 100 && rect.bottom >= 100;
-        }
-        return false;
-      });
-      
-      if (current) setActiveSection(current);
     };
 
     window.addEventListener("scroll", handleScroll);
@@ -73,26 +61,9 @@ const Navbar = () => {
     setIsMenuOpen(false);
   };
 
-  const handleSmoothScroll = (e, targetId) => {
-    e.preventDefault();
-    const element = document.getElementById(targetId);
-    if (element) {
-      const offset = 80;
-      const elementPosition = element.getBoundingClientRect().top;
-      const offsetPosition = elementPosition + window.pageYOffset - offset;
-
-      window.scrollTo({
-        top: offsetPosition,
-        behavior: "smooth"
-      });
-    }
-    closeMenu();
-  };
-
   const navLinks = [
-    { href: "how-it-works", label: "How It Works" },
-    { href: "pricing", label: "Pricing" },
-    { href: "faq", label: "FAQ" },
+    { href: "/pricing", label: "Pricing" },
+    { href: "/faq", label: "FAQ" },
   ];
 
   return (
@@ -123,26 +94,17 @@ const Navbar = () => {
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-1 lg:gap-2">
             {navLinks.map((link) => (
-              <a
+              <Link
                 key={link.href}
-                href={`#${link.href}`}
-                onClick={(e) => handleSmoothScroll(e, link.href)}
-                className="relative"
+                to={link.href}
               >
                 <Button 
                   variant="ghost" 
-                  className={`hover:bg-accent/10 transition-all ${
-                    activeSection === link.href 
-                      ? "text-primary font-semibold" 
-                      : ""
-                  }`}
+                  className="hover:bg-accent/10 transition-all"
                 >
                   {link.label}
-                  {activeSection === link.href && (
-                    <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1/2 h-0.5 bg-primary rounded-full" />
-                  )}
                 </Button>
-              </a>
+              </Link>
             ))}
             <div className="w-px h-6 bg-border/50 mx-2" />
             
@@ -158,11 +120,13 @@ const Navbar = () => {
               <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
             </Button>
             
-            <Link to="/login">
-              <Button variant="ghost" className="hover:bg-accent/10">
-                Login
-              </Button>
-            </Link>
+            {!user && (
+              <Link to="/login">
+                <Button variant="ghost" className="hover:bg-accent/10">
+                  Login
+                </Button>
+              </Link>
+            )}
             <Link to="/dashboard">
               <Button className="bg-gradient-to-r from-primary to-accent hover:opacity-90 transition-opacity shadow-md">
                 Dashboard
@@ -213,33 +177,31 @@ const Navbar = () => {
             {/* Menu Panel */}
             <div className="md:hidden mt-4 pb-4 space-y-2 animate-in slide-in-from-top duration-200">
               {navLinks.map((link) => (
-                <a
+                <Link
                   key={link.href}
-                  href={`#${link.href}`}
-                  onClick={(e) => handleSmoothScroll(e, link.href)}
+                  to={link.href}
+                  onClick={closeMenu}
                   className="block"
                 >
                   <Button 
                     variant="ghost" 
-                    className={`w-full justify-start hover:bg-accent/10 transition-all ${
-                      activeSection === link.href 
-                        ? "bg-accent/5 text-primary font-semibold" 
-                        : ""
-                    }`}
+                    className="w-full justify-start hover:bg-accent/10 transition-all"
                   >
                     {link.label}
                   </Button>
-                </a>
+                </Link>
               ))}
               <div className="h-px bg-border/50 my-2" />
-              <Link to="/login" onClick={closeMenu} className="block">
-                <Button 
-                  variant="ghost" 
-                  className="w-full justify-start hover:bg-accent/10"
-                >
-                  Login
-                </Button>
-              </Link>
+              {!user && (
+                <Link to="/login" onClick={closeMenu} className="block">
+                  <Button 
+                    variant="ghost" 
+                    className="w-full justify-start hover:bg-accent/10"
+                  >
+                    Login
+                  </Button>
+                </Link>
+              )}
               <Link to="/dashboard" onClick={closeMenu} className="block">
                 <Button className="w-full bg-gradient-to-r from-primary to-accent hover:opacity-90 transition-opacity shadow-md">
                   Dashboard
