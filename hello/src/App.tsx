@@ -8,6 +8,8 @@ import Index from "./pages/Index";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import OAuthCallback from "./pages/OAuthCallback";
+import PricingPage from "./pages/PricingPage";
+import FAQPage from "./pages/FAQPage";
 import NotFound from "./pages/NotFound";
 import Navbar from "./components/Navbar";
 
@@ -24,8 +26,6 @@ export const useAuth = () => {
   return context;
 };
 
-// Updated AuthProvider in App.jsx
-
 const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -40,7 +40,6 @@ const AuthProvider = ({ children }) => {
     try {
       console.log('🔍 Checking authentication status...');
 
-      // Get token from localStorage
       const accessToken = localStorage.getItem('accessToken');
 
       if (!accessToken) {
@@ -53,7 +52,7 @@ const AuthProvider = ({ children }) => {
       const response = await fetch(`${API_URL}/auth/user`, {
         credentials: 'include',
         headers: {
-          'Authorization': `Bearer ${accessToken}`, // ✅ Send token in header
+          'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         }
       });
@@ -65,10 +64,8 @@ const AuthProvider = ({ children }) => {
       } else if (response.status === 401) {
         console.log('❌ Token invalid or expired, trying refresh...');
 
-        // Try to refresh the token
         const refreshed = await attemptTokenRefresh();
         if (refreshed) {
-          // Retry authentication
           await checkAuthStatus();
         } else {
           console.log('❌ Refresh failed, clearing tokens');
@@ -144,12 +141,10 @@ const AuthProvider = ({ children }) => {
         }
       });
 
-      // Clear tokens regardless of response
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');
       setUser(null);
 
-      // ✅ ADD THIS - Notify extension to clear tokens
       try {
         window.postMessage({ type: 'CLEAR_TOKENS' }, window.location.origin);
         console.log('📤 Extension tokens cleared');
@@ -159,12 +154,10 @@ const AuthProvider = ({ children }) => {
 
     } catch (error) {
       console.error('Logout failed:', error);
-      // Still clear tokens even if request fails
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');
       setUser(null);
 
-      // ✅ ADD THIS HERE TOO
       try {
         window.postMessage({ type: 'CLEAR_TOKENS' }, window.location.origin);
         console.log('📤 Extension tokens cleared');
@@ -188,7 +181,6 @@ const AuthProvider = ({ children }) => {
   );
 };
 
-// Protected Route Component
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
 
@@ -207,7 +199,6 @@ const ProtectedRoute = ({ children }) => {
   return <>{children}</>;
 };
 
-// Public Route Component (redirects to dashboard if already logged in)
 const PublicRoute = ({ children }) => {
   const { user, loading } = useAuth();
 
@@ -236,6 +227,12 @@ const App = () => (
           <Routes>
             {/* Public Routes */}
             <Route path="/" element={<Index />} />
+
+            {/* Pricing Page - Public route */}
+            <Route path="/pricing" element={<PricingPage />} />
+
+            {/* FAQ Page - Public route */}
+            <Route path="/faq" element={<FAQPage />} />
 
             {/* Auth Routes - Redirect to dashboard if already logged in */}
             <Route
