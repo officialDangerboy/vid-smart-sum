@@ -898,7 +898,7 @@ const Dashboard = () => {
             <CardDescription className="text-xs sm:text-sm">
               {isPro
                 ? "Share your referral link and help friends discover Pro features!"
-                : "Earn tiered rewards: 50 credits for 1st friend, 25 for 2nd, then 15 for each! 🎁"}
+                : "Earn tiered rewards: 15 credits for 1st friend, 10 for 2nd, then 5 for each! 🎁"}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -951,7 +951,7 @@ const Dashboard = () => {
                         1st
                       </div>
                       <div className="text-center space-y-1 sm:space-y-2">
-                        <div className="text-2xl sm:text-3xl font-bold text-amber-600">+50</div>
+                        <div className="text-2xl sm:text-3xl font-bold text-amber-600">+15</div>
                         <p className="text-[10px] sm:text-xs font-medium">Credits</p>
                         <p className="text-[10px] sm:text-xs text-muted-foreground">First friend bonus!</p>
                       </div>
@@ -967,7 +967,7 @@ const Dashboard = () => {
                         2nd
                       </div>
                       <div className="text-center space-y-1 sm:space-y-2">
-                        <div className="text-2xl sm:text-3xl font-bold text-blue-600">+25</div>
+                        <div className="text-2xl sm:text-3xl font-bold text-blue-600">+10</div>
                         <p className="text-[10px] sm:text-xs font-medium">Credits</p>
                         <p className="text-[10px] sm:text-xs text-muted-foreground">Second friend!</p>
                       </div>
@@ -983,7 +983,7 @@ const Dashboard = () => {
                         3rd+
                       </div>
                       <div className="text-center space-y-1 sm:space-y-2">
-                        <div className="text-2xl sm:text-3xl font-bold text-green-600">+15</div>
+                        <div className="text-2xl sm:text-3xl font-bold text-green-600">+5</div>
                         <p className="text-[10px] sm:text-xs font-medium">Credits</p>
                         <p className="text-[10px] sm:text-xs text-muted-foreground">Each after!</p>
                       </div>
