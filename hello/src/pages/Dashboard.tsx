@@ -591,7 +591,7 @@ const Dashboard = () => {
                     <div className="space-y-1">
                       <p className="text-xs sm:text-sm text-muted-foreground">Used This Month</p>
                       <p className="text-2xl sm:text-3xl font-bold text-muted-foreground">
-                        {(userData.credits?.monthly_allocation || 0) - (userData.credits?.balance || 0)}
+                        {(userData.credits?.monthly_allocation + userData.credits?.referral_credits) - (userData.credits?.balance || 0)}
                       </p>
                       <p className="text-[10px] sm:text-xs text-muted-foreground">
                         {userData.credits?.lifetime_spent || 0} lifetime
