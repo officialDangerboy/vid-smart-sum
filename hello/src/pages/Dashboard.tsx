@@ -344,15 +344,6 @@ const Dashboard = () => {
                 <RefreshCw className={`w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 ${refreshing ? 'animate-spin' : ''}`} />
                 Refresh
               </Button>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => navigate('/settings')}
-                className="flex-1 sm:flex-none text-xs sm:text-sm"
-              >
-                <Settings className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
-                Settings
-              </Button>
             </div>
           </div>
         </div>
@@ -381,9 +372,6 @@ const Dashboard = () => {
               <span className="text-xs sm:text-sm">
                 Your Pro subscription is set to cancel on {formatDate(userData.subscription.current_period_end)}
               </span>
-              <Button size="sm" variant="outline" onClick={() => navigate('/settings')} className="w-full sm:w-auto shrink-0 text-xs">
-                Reactivate
-              </Button>
             </AlertDescription>
           </Alert>
         )}

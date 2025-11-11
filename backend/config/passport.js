@@ -8,11 +8,11 @@ const crypto = require('crypto');
 
 function calculateReferralCredits(referralCount) {
   if (referralCount === 0) {
-    return 50; // First referral: 50 credits
+    return 15; // First referral: 50 credits
   } else if (referralCount === 1) {
-    return 25; // Second referral: 25 credits
+    return 10; // Second referral: 25 credits
   } else {
-    return 15; // Third onwards: 15 credits each
+    return 5; // Third onwards: 15 credits each
   }
 }
 

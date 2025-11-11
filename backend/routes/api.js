@@ -70,17 +70,17 @@ router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
           cancelled_at: user.subscription?.cancelled_at || null
         },
 
-        // Credits
+        // Credits (50 initial, 50 monthly reset)
         credits: {
-          balance: user.credits?.balance || 100,
-          monthly_allocation: user.credits?.monthly_allocation || 100,
+          balance: user.credits?.balance || 50,
+          monthly_allocation: user.credits?.monthly_allocation || 50,
           referral_credits: user.credits?.referral_credits || 0,
           next_reset_at: user.credits?.next_reset_at || new Date(),
-          lifetime_earned: user.credits?.lifetime_earned || 100,
+          lifetime_earned: user.credits?.lifetime_earned || 50,
           lifetime_spent: user.credits?.lifetime_spent || 0
         },
 
-        // Complete Usage Stats with Limits
+        // Complete Usage Stats with Limits (3 daily, 50 monthly)
         usage: {
           summaries_today: user.usage?.summaries_today || 0,
           summaries_this_week: user.usage?.summaries_this_week || 0,
@@ -92,8 +92,8 @@ router.get('/user/profile', authenticateJWT, trackIP, async (req, res) => {
 
           // Usage Limits (crucial for dashboard)
           limits: {
-            daily_summaries: user.usage?.limits?.daily_summaries || 30,
-            monthly_summaries: user.usage?.limits?.monthly_summaries || 150,
+            daily_summaries: user.usage?.limits?.daily_summaries || 3,  // ✅ 3 per day
+            monthly_summaries: user.usage?.limits?.monthly_summaries || 50,  // ✅ 50 per month
             video_duration_seconds: user.usage?.limits?.video_duration_seconds || 1200
           },
 
@@ -247,7 +247,7 @@ router.post('/transcript/fetch', async (req, res) => {
 });
 
 // ============================================
-// SUMMARY ROUTES (WITH SUPABASE)
+// ✅ UPDATED: SUMMARY ROUTES (5 CREDITS PER SUMMARY)
 // ============================================
 router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
   try {
@@ -304,9 +304,12 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
         success: false,
         error: canGenerate.reason,
         credits_balance: user.credits.balance,
+        credits_required: 5,  // ✅ Always 5 credits needed
         next_reset: user.credits.next_reset_at,
         daily_limit: user.usage.limits.daily_summaries,
-        summaries_today: user.usage.summaries_today
+        monthly_limit: user.usage.limits.monthly_summaries,
+        summaries_today: user.usage.summaries_today,
+        summaries_this_month: user.usage.summaries_this_month
       });
     }
 
@@ -325,9 +328,9 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
       // Update access stats
       await supabaseService.updateSummaryAccess(video_id, ai_provider, summary_type);
 
-      // Deduct credits for free users (1 credit even for cached)
+      // ✅ CHANGED: Deduct 5 credits for free users (even for cached)
       if (user.subscription.plan === 'free') {
-        await user.deductCredits(1, `Video summary (${summary_type}, cached)`, {
+        await user.deductCredits(5, `Video summary (${summary_type}, cached)`, {
           video_id,
           video_title,
           cached: true,
@@ -345,7 +348,7 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
         ai_provider,
         model_used: 'python_backend',
         summary_length: summary_type,
-        credits_used: user.subscription.plan === 'free' ? 1 : 0,
+        credits_used: user.subscription.plan === 'free' ? 5 : 0,  // ✅ 5 credits
         processing_time: 0,
         success: true,
         cached: true
@@ -401,7 +404,9 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
           credits_remaining: user.credits.balance,
           summaries_today: user.usage.summaries_today,
           summaries_this_month: user.usage.summaries_this_month,
-          total_summaries: user.usage.total_summaries
+          total_summaries: user.usage.total_summaries,
+          daily_limit: user.usage.limits.daily_summaries,
+          monthly_limit: user.usage.limits.monthly_summaries
         }
       });
     }
@@ -409,10 +414,10 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
     console.log(`❌ SUMMARY CACHE MISS - Generating new ${summary_type} summary`);
 
     // ============================================
-    // 4. DEDUCT CREDITS (BEFORE GENERATION)
+    // 4. ✅ DEDUCT 5 CREDITS (BEFORE GENERATION)
     // ============================================
     if (user.subscription.plan === 'free') {
-      await user.deductCredits(1, `Video summary (${summary_type})`, {
+      await user.deductCredits(5, `Video summary (${summary_type})`, {
         video_id,
         video_title,
         video_duration,
@@ -432,9 +437,9 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
         summary_type
       );
     } catch (error) {
-      // Refund credits if generation failed
+      // ✅ Refund 5 credits if generation failed
       if (user.subscription.plan === 'free') {
-        await user.addCredits(1, 'Refund for failed summary generation');
+        await user.addCredits(5, 'refund', 'Refund for failed summary generation');
       }
       
       throw new Error(`Python backend failed: ${error.message}`);
@@ -495,7 +500,7 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
       ai_provider,
       model_used: 'python_backend',
       summary_length: summary_type,
-      credits_used: user.subscription.plan === 'free' ? 1 : 0,
+      credits_used: user.subscription.plan === 'free' ? 5 : 0,  // ✅ 5 credits
       processing_time: processingTime,
       success: true,
       cached: false
@@ -541,7 +546,9 @@ router.post('/summary/generate', authenticateJWT, trackIP, async (req, res) => {
         credits_remaining: user.credits.balance,
         summaries_today: user.usage.summaries_today,
         summaries_this_month: user.usage.summaries_this_month,
-        total_summaries: user.usage.total_summaries
+        total_summaries: user.usage.total_summaries,
+        daily_limit: user.usage.limits.daily_summaries,
+        monthly_limit: user.usage.limits.monthly_summaries
       }
     });
 
@@ -596,7 +603,7 @@ async function fetchTranscriptFromYouTube(videoId) {
       {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"  // ADD THIS!
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({ video_id: videoId })
       }
@@ -624,7 +631,7 @@ async function fetchTranscriptFromYouTube(videoId) {
     };
   } catch (err) {
     console.error("Error fetching transcript:", err);
-    return null;  // Return null on error
+    return null;
   }
 }
 

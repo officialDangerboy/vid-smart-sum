@@ -36,7 +36,7 @@ const creditTransactionSchema = new mongoose.Schema({
   }
 }, { _id: true });
 
-// ✅ FIXED: Updated usageLogSchema
+// ✅ UPDATED: Fixed usageLogSchema
 const usageLogSchema = new mongoose.Schema({
   video_id: String,
   video_title: String,
@@ -45,7 +45,7 @@ const usageLogSchema = new mongoose.Schema({
   channel_name: String,
   ai_provider: {
     type: String,
-    enum: ['openai', 'anthropic', 'google', 'python_backend'],  // ✅ Added 'python_backend'
+    enum: ['openai', 'anthropic', 'google', 'python_backend'],
     default: 'python_backend'
   },
   model_used: {
@@ -54,15 +54,15 @@ const usageLogSchema = new mongoose.Schema({
   },
   summary_length: {
     type: String,
-    enum: ['short', 'medium', 'detailed'],  // ✅ Changed 'long' to 'detailed'
+    enum: ['short', 'medium', 'detailed'],
     default: 'medium'
   },
   credits_used: {
     type: Number,
-    default: 1
+    default: 5  // ✅ CHANGED: Default to 5 credits per summary
   },
   processing_time: Number,
-  cached: {  // ✅ Added cached field
+  cached: {
     type: Boolean,
     default: false
   },
@@ -138,16 +138,16 @@ const userSchema = new mongoose.Schema({
   },
   picture: String,
   
-  // Credits System
+  // ✅ UPDATED: Credits System (50 credits signup, 5 per summary)
   credits: {
     balance: {
       type: Number,
-      default: 100,
+      default: 50,  // ✅ CHANGED: 50 credits on signup
       min: 0
     },
     monthly_allocation: {
       type: Number,
-      default: 100
+      default: 50  // ✅ CHANGED: 50 credits per month
     },
     last_reset: {
       type: Date,
@@ -163,7 +163,7 @@ const userSchema = new mongoose.Schema({
     },
     lifetime_earned: {
       type: Number,
-      default: 100
+      default: 50  // ✅ CHANGED: Starting lifetime earned
     },
     lifetime_spent: {
       type: Number,
@@ -215,7 +215,7 @@ const userSchema = new mongoose.Schema({
     }
   },
 
-  // Usage Tracking
+  // ✅ UPDATED: Usage Tracking (3 daily, 50 monthly limit)
   usage: {
     summaries_today: {
       type: Number,
@@ -246,11 +246,11 @@ const userSchema = new mongoose.Schema({
     limits: {
       daily_summaries: {
         type: Number,
-        default: 30
+        default: 3  // ✅ CHANGED: 3 summaries per day for free users
       },
       monthly_summaries: {
         type: Number,
-        default: 150
+        default: 50  // ✅ CHANGED: 50 summaries per month for free users
       },
       video_duration_seconds: {
         type: Number,
@@ -269,19 +269,19 @@ const userSchema = new mongoose.Schema({
     }
   },
 
-  // ✅ FIXED: Updated preferences
+  // ✅ UPDATED: Preferences
   preferences: {
     ai: {
       default_provider: {
         type: String,
-        enum: ['openai', 'anthropic', 'google', 'python_backend'],  // ✅ Added 'python_backend'
+        enum: ['openai', 'anthropic', 'google', 'python_backend'],
         default: 'python_backend'
       }
     },
     summary: {
       default_length: {
         type: String,
-        enum: ['short', 'medium', 'detailed'],  // ✅ Changed 'long' to 'detailed'
+        enum: ['short', 'medium', 'detailed'],
         default: 'medium'
       }
     },
@@ -449,6 +449,7 @@ userSchema.methods.deductCredits = async function(amount, description = '', meta
   return this.credits.balance;
 };
 
+// ✅ UPDATED: Check if user can generate summary (5 credits required, 3 daily, 50 monthly)
 userSchema.methods.canGenerateSummary = function(videoDuration = 0) {
   if (this.flags.is_banned) {
     return { allowed: false, reason: 'Account is banned' };
@@ -466,15 +467,18 @@ userSchema.methods.canGenerateSummary = function(videoDuration = 0) {
     };
   }
   
-  if (this.credits.balance < 1) {
+  // ✅ CHANGED: Check for 5 credits instead of 1
+  if (this.credits.balance < 5) {
     return { 
       allowed: false, 
-      reason: 'Insufficient credits. You need at least 1 credit.',
+      reason: 'Insufficient credits. You need at least 5 credits to generate a summary.',
       credits_remaining: this.credits.balance,
+      credits_required: 5,
       next_reset: this.credits.next_reset_at
     };
   }
   
+  // ✅ Check daily limit (3 summaries per day)
   if (this.usage.summaries_today >= this.usage.limits.daily_summaries) {
     return { 
       allowed: false, 
@@ -482,6 +486,17 @@ userSchema.methods.canGenerateSummary = function(videoDuration = 0) {
       daily_limit: this.usage.limits.daily_summaries,
       summaries_today: this.usage.summaries_today,
       resets_at: this.usage.daily_reset_at
+    };
+  }
+  
+  // ✅ Check monthly limit (50 summaries per month)
+  if (this.usage.summaries_this_month >= this.usage.limits.monthly_summaries) {
+    return { 
+      allowed: false, 
+      reason: `Monthly limit of ${this.usage.limits.monthly_summaries} summaries reached`,
+      monthly_limit: this.usage.limits.monthly_summaries,
+      summaries_this_month: this.usage.summaries_this_month,
+      next_reset: this.credits.next_reset_at
     };
   }
   
@@ -499,11 +514,13 @@ userSchema.methods.canGenerateSummary = function(videoDuration = 0) {
     allowed: true, 
     reason: 'Access granted',
     credits_remaining: this.credits.balance,
-    daily_remaining: this.usage.limits.daily_summaries - this.usage.summaries_today
+    credits_required: 5,
+    daily_remaining: this.usage.limits.daily_summaries - this.usage.summaries_today,
+    monthly_remaining: this.usage.limits.monthly_summaries - this.usage.summaries_this_month
   };
 };
 
-// ✅ FIXED: Updated logUsage to accept cached parameter
+// ✅ UPDATED: Log usage with 5 credits deduction
 userSchema.methods.logUsage = async function(usageData) {
   this.usage.summaries_today += 1;
   this.usage.summaries_this_month += 1;
@@ -525,9 +542,9 @@ userSchema.methods.logUsage = async function(usageData) {
     ai_provider: usageData.ai_provider || 'python_backend',
     model_used: usageData.model_used || 'python_backend',
     summary_length: usageData.summary_length || 'medium',
-    credits_used: usageData.credits_used || 0,
+    credits_used: usageData.credits_used || 5,  // ✅ CHANGED: Default to 5 credits
     processing_time: usageData.processing_time,
-    cached: usageData.cached || false,  // ✅ Added cached field
+    cached: usageData.cached || false,
     success: usageData.success !== undefined ? usageData.success : true,
     error_message: usageData.error_message,
     timestamp: new Date()
@@ -542,6 +559,7 @@ userSchema.methods.logUsage = async function(usageData) {
   await this.save();
 };
 
+// ✅ UPDATED: Monthly reset with 50 credits
 userSchema.methods.resetMonthlyCredits = async function() {
   if (this.subscription.plan === 'free') {
     const now = new Date();
@@ -610,6 +628,7 @@ userSchema.methods.upgradeSubscription = async function(plan, billingCycle, stri
   };
 };
 
+// ✅ UPDATED: Feature access with new limits
 userSchema.methods.updateFeatureAccess = function() {
   const plan = this.subscription.plan;
   
@@ -620,8 +639,8 @@ userSchema.methods.updateFeatureAccess = function() {
     this.features.export_summaries = false;
     this.features.priority_support = false;
     
-    this.usage.limits.daily_summaries = 10;
-    this.usage.limits.monthly_summaries = 300;
+    this.usage.limits.daily_summaries = 3;  // ✅ CHANGED: 3 per day
+    this.usage.limits.monthly_summaries = 50;  // ✅ CHANGED: 50 per month
     this.usage.limits.video_duration_seconds = 1200;
     
   } else if (plan === 'pro') {
