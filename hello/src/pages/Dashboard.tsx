@@ -737,7 +737,7 @@ const Dashboard = () => {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl sm:text-3xl font-bold">{userData.usage?.total_time_saved / 60 || 0}h</div>
+              <div className="text-2xl sm:text-3xl font-bold">{userData.usage?.total_time_saved || 0}h</div>
               <p className="text-[10px] sm:text-xs text-muted-foreground mt-1">
                 All summaries
               </p>
