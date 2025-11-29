@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   LogOut, User, Mail, Calendar, CreditCard,
   TrendingUp, Clock, Video, Share2, Crown, Zap, Copy, Check,
-  Shield, AlertCircle, Sparkles, RefreshCw, Settings, History,
+  Shield, AlertCircle, Sparkles, RefreshCw, History,
   Infinity, Download, MessageSquare, Lock, Unlock, Target, Activity, Trophy, Gift, Star
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -27,7 +27,7 @@ const Dashboard = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
-  const API_URL = import.meta.env.VITE_API_URL || "https://vid-smart-sum.vercel.app";
+  const API_URL = import.meta.env.VITE_API_URL || "https://vid-smart-hhxnurt4s-leapsax.vercel.app";
 
   useEffect(() => {
     fetchUserData();
@@ -53,7 +53,7 @@ const Dashboard = () => {
 
       if (response.ok) {
         const data = await response.json();
-        
+
         if (data.success && data.user) {
           setUserData(data.user);
           setRetryCount(0);
@@ -184,7 +184,7 @@ const Dashboard = () => {
           title: "Logged out from all devices",
           description: "All your sessions have been terminated.",
         });
-        
+
         await logout();
         navigate('/login');
       } else {
@@ -222,11 +222,10 @@ const Dashboard = () => {
     });
   };
 
-  // FIXED: Calculate tiered referral rewards (50, 25, 15)
   const getReferralReward = (referralCount) => {
-    if (referralCount === 0) return 50; // 1st referral
-    if (referralCount === 1) return 25; // 2nd referral
-    return 15; // 3rd and beyond
+    if (referralCount === 0) return 15;
+    if (referralCount === 1) return 10;
+    return 5;
   };
 
   const getNextReferralReward = () => {
@@ -272,8 +271,20 @@ const Dashboard = () => {
     );
   }
 
-  const isPro = userData.subscription?.plan === 'pro';
-  
+  // ✅ FIXED: Support all Pro plan types
+  const isPro = 
+    userData.subscription?.plan === 'pro' ||
+    userData.subscription?.plan === 'pro_monthly' ||
+    userData.subscription?.plan === 'pro_yearly';
+
+  // ✅ FIXED: Get plan display name
+  const getPlanDisplayName = () => {
+    if (userData.subscription?.plan === 'pro_monthly') return 'Pro Monthly';
+    if (userData.subscription?.plan === 'pro_yearly') return 'Pro Yearly';
+    if (userData.subscription?.plan === 'pro') return 'Pro';
+    return 'Free';
+  };
+
   const getInitials = (name) => {
     return name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'U';
   };
@@ -287,26 +298,26 @@ const Dashboard = () => {
     });
   };
 
-  const creditPercentage = isPro 
-    ? 100 
+  const creditPercentage = isPro
+    ? 100
     : Math.min(100, (userData.credits?.balance / userData.credits?.monthly_allocation) * 100);
-  
-  const daysUntilReset = userData.credits?.next_reset_at 
+
+  const daysUntilReset = userData.credits?.next_reset_at
     ? Math.max(0, Math.ceil((new Date(userData.credits.next_reset_at) - new Date()) / (1000 * 60 * 60 * 24)))
     : 0;
 
-  const dailyUsagePercentage = isPro 
-    ? 0 
+  const dailyUsagePercentage = isPro
+    ? 0
     : (userData.usage?.summaries_today / userData.usage?.limits?.daily_summaries) * 100;
-  
-  const monthlyUsagePercentage = isPro 
-    ? 0 
+
+  const monthlyUsagePercentage = isPro
+    ? 0
     : (userData.usage?.summaries_this_month / userData.usage?.limits?.monthly_summaries) * 100;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5 pt-20 sm:pt-24 px-3 sm:px-4 pb-8 sm:pb-12">
       <div className="max-w-7xl mx-auto">
-        {/* RESPONSIVE Header */}
+        {/* Header */}
         <div className="mb-6 sm:mb-8 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
             <div className="space-y-2">
@@ -318,7 +329,7 @@ const Dashboard = () => {
                 {isPro && (
                   <Badge className="bg-gradient-to-r from-amber-500 to-orange-500 text-white border-0 text-xs sm:text-sm">
                     <Crown className="w-3 h-3 mr-1" />
-                    Pro Member
+                    {getPlanDisplayName()}
                   </Badge>
                 )}
                 {!isPro && (
@@ -348,13 +359,13 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* RESPONSIVE Alert Messages */}
+        {/* Alert Messages */}
         {!isPro && userData.credits?.balance < 10 && (
           <Alert className="mb-4 sm:mb-6 border-orange-500/50 bg-orange-500/10">
             <AlertCircle className="h-4 w-4 text-orange-500 shrink-0" />
             <AlertDescription className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
               <span className="text-xs sm:text-sm">
-                You're running low on credits! Only <strong>{userData.credits.balance}</strong> left. 
+                You're running low on credits! Only <strong>{userData.credits.balance}</strong> left.
                 {daysUntilReset > 0 && ` Resets in ${daysUntilReset} days.`}
               </span>
               <Button size="sm" onClick={() => navigate('/pricing')} className="w-full sm:w-auto shrink-0 text-xs">
@@ -376,9 +387,21 @@ const Dashboard = () => {
           </Alert>
         )}
 
-        {/* RESPONSIVE Main Grid */}
+        {/* Success Banner for New Pro Users */}
+        {isPro && (
+          <Alert className="mb-4 sm:mb-6 border-green-500/50 bg-green-500/10">
+            <Check className="h-4 w-4 text-green-500 shrink-0" />
+            <AlertDescription className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
+              <span className="text-xs sm:text-sm">
+                <strong>Welcome to {getPlanDisplayName()}!</strong> You now have unlimited access to all premium features. 🎉
+              </span>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
-          {/* RESPONSIVE Profile Card */}
+          {/* Profile Card */}
           <Card className="lg:col-span-1">
             <CardHeader className="pb-3 sm:pb-4">
               <CardTitle className="text-base sm:text-lg flex items-center justify-between">
@@ -437,13 +460,14 @@ const Dashboard = () => {
                     </div>
                   </div>
 
-                  {isPro && userData.subscription?.billing_cycle && (
+                  {isPro && (
                     <div>
                       <div className="text-xs text-muted-foreground mb-1">Billing Cycle</div>
                       <div className="flex items-center justify-center gap-2">
                         <CreditCard className="w-3 h-3 text-muted-foreground" />
                         <span className="font-semibold text-xs sm:text-sm capitalize">
-                          {userData.subscription.billing_cycle}
+                          {userData.subscription.plan === 'pro_monthly' ? 'Monthly' :
+                           userData.subscription.plan === 'pro_yearly' ? 'Yearly' : 'Pro'}
                         </span>
                       </div>
                     </div>
@@ -484,7 +508,7 @@ const Dashboard = () => {
             </CardContent>
           </Card>
 
-          {/* RESPONSIVE Credits/Usage Card */}
+          {/* Credits/Usage Card */}
           <Card className="lg:col-span-2">
             <CardHeader className="pb-3 sm:pb-4">
               <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
@@ -508,7 +532,7 @@ const Dashboard = () => {
             </CardHeader>
             <CardContent className="space-y-4 sm:space-y-6">
               {isPro ? (
-                // PRO USER VIEW - RESPONSIVE
+                // PRO USER VIEW
                 <>
                   <div className="text-center py-4 sm:py-6 space-y-3 sm:space-y-4">
                     <div className="inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-amber-500/20 to-orange-500/20 mb-2">
@@ -567,7 +591,7 @@ const Dashboard = () => {
                     <div className="text-center">
                       <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Member</p>
                       <p className="text-lg sm:text-2xl font-bold">
-                        {userData.subscription?.started_at 
+                        {userData.subscription?.started_at
                           ? Math.ceil((new Date() - new Date(userData.subscription.started_at)) / (1000 * 60 * 60 * 24))
                           : 0}d
                       </p>
@@ -576,7 +600,7 @@ const Dashboard = () => {
                   </div>
                 </>
               ) : (
-                // FREE USER VIEW - RESPONSIVE
+                // FREE USER VIEW
                 <>
                   <div className="grid grid-cols-2 gap-3 sm:gap-4">
                     <div className="space-y-1">
@@ -613,14 +637,12 @@ const Dashboard = () => {
 
                   <Separator />
 
-                  {/* Usage Limits - RESPONSIVE */}
                   <div className="space-y-3 sm:space-y-4">
                     <h4 className="text-xs sm:text-sm font-medium flex items-center gap-2">
                       <Target className="w-3 h-3 sm:w-4 sm:h-4" />
                       Usage Limits
                     </h4>
 
-                    {/* Daily Limit */}
                     <div className="space-y-1.5 sm:space-y-2">
                       <div className="flex justify-between text-xs sm:text-sm">
                         <span className="text-muted-foreground">Daily Summaries</span>
@@ -634,7 +656,6 @@ const Dashboard = () => {
                       </p>
                     </div>
 
-                    {/* Monthly Limit */}
                     <div className="space-y-1.5 sm:space-y-2">
                       <div className="flex justify-between text-xs sm:text-sm">
                         <span className="text-muted-foreground">Monthly Summaries</span>
@@ -648,7 +669,6 @@ const Dashboard = () => {
                       </p>
                     </div>
 
-                    {/* Video Duration Limit */}
                     <div className="p-2 sm:p-3 rounded-lg bg-muted/50 border">
                       <div className="flex items-center gap-2 mb-1">
                         <Clock className="w-3 h-3 sm:w-4 sm:h-4 text-muted-foreground" />
@@ -670,7 +690,7 @@ const Dashboard = () => {
                     <div className="text-center">
                       <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Lifetime</p>
                       <p className="text-base sm:text-lg font-semibold">
-                        {userData.credits?.lifetime_earned || 0} 
+                        {userData.credits?.lifetime_earned || 0}
                       </p>
                     </div>
                     <div className="text-center">
@@ -682,7 +702,7 @@ const Dashboard = () => {
                   </div>
 
                   <Alert className="border-primary/50 bg-primary/5">
-                    <Zap className="h-3 h-3 sm:h-4 sm:w-4 text-primary" />
+                    <Zap className="h-4 w-4 text-primary" />
                     <AlertDescription className="text-xs sm:text-sm">
                       <span className="font-medium">Want unlimited access?</span> Upgrade to Pro for unlimited summaries!
                     </AlertDescription>
@@ -698,7 +718,7 @@ const Dashboard = () => {
           </Card>
         </div>
 
-        {/* RESPONSIVE Stats Grid */}
+        {/* Stats Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-6 sm:mb-8">
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="pb-2 sm:pb-3">
@@ -810,7 +830,7 @@ const Dashboard = () => {
           </Card>
         </div>
 
-        {/* RESPONSIVE Features Overview - Pro Only */}
+        {/* Features Overview - Pro Only */}
         {isPro && userData.features && (
           <Card className="mb-6 sm:mb-8 border-amber-500/20 bg-gradient-to-br from-amber-500/5 to-orange-500/5">
             <CardHeader className="pb-3 sm:pb-4">
@@ -888,7 +908,7 @@ const Dashboard = () => {
           </Card>
         )}
 
-        {/* RESPONSIVE TIERED Referral Card - 50/25/15 Credits */}
+        {/* Referral Card */}
         <Card className="mb-6 sm:mb-8 border-primary/20 bg-gradient-to-br from-primary/5 to-accent/5">
           <CardHeader className="pb-3 sm:pb-4">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg flex-wrap">
@@ -903,7 +923,6 @@ const Dashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-3 sm:space-y-4">
-              {/* RESPONSIVE Referral Link */}
               <div className="space-y-2">
                 <label className="text-xs text-muted-foreground block">Your Referral Link</label>
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-2 sm:p-3 bg-background rounded-lg border">
@@ -932,21 +951,18 @@ const Dashboard = () => {
                 </div>
               </div>
 
-              {/* RESPONSIVE Tiered Rewards System */}
               {!isPro && (
                 <div className="space-y-2 sm:space-y-3">
                   <div className="flex items-center gap-2">
                     <Star className="w-4 h-4 text-amber-500" />
                     <h4 className="text-xs sm:text-sm font-semibold">Tiered Rewards System</h4>
                   </div>
-                  
+
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
-                    {/* 1st Referral - 50 Credits */}
-                    <div className={`relative p-3 sm:p-4 rounded-lg border-2 ${
-                      (userData.referral?.total_referrals || 0) === 0 
-                        ? 'border-amber-500 bg-gradient-to-br from-amber-500/20 to-orange-500/20' 
+                    <div className={`relative p-3 sm:p-4 rounded-lg border-2 ${(userData.referral?.total_referrals || 0) === 0
+                        ? 'border-amber-500 bg-gradient-to-br from-amber-500/20 to-orange-500/20'
                         : 'border-muted bg-muted/20'
-                    }`}>
+                      }`}>
                       <div className="absolute -top-2 -right-2 bg-amber-500 text-white text-[10px] sm:text-xs font-bold px-1.5 sm:px-2 py-0.5 rounded-full">
                         1st
                       </div>
@@ -957,12 +973,10 @@ const Dashboard = () => {
                       </div>
                     </div>
 
-                    {/* 2nd Referral - 25 Credits */}
-                    <div className={`relative p-3 sm:p-4 rounded-lg border-2 ${
-                      (userData.referral?.total_referrals || 0) === 1 
-                        ? 'border-blue-500 bg-gradient-to-br from-blue-500/20 to-cyan-500/20' 
+                    <div className={`relative p-3 sm:p-4 rounded-lg border-2 ${(userData.referral?.total_referrals || 0) === 1
+                        ? 'border-blue-500 bg-gradient-to-br from-blue-500/20 to-cyan-500/20'
                         : 'border-muted bg-muted/20'
-                    }`}>
+                      }`}>
                       <div className="absolute -top-2 -right-2 bg-blue-500 text-white text-[10px] sm:text-xs font-bold px-1.5 sm:px-2 py-0.5 rounded-full">
                         2nd
                       </div>
@@ -973,12 +987,10 @@ const Dashboard = () => {
                       </div>
                     </div>
 
-                    {/* 3rd+ Referral - 15 Credits */}
-                    <div className={`relative p-3 sm:p-4 rounded-lg border-2 ${
-                      (userData.referral?.total_referrals || 0) >= 2 
-                        ? 'border-green-500 bg-gradient-to-br from-green-500/20 to-emerald-500/20' 
+                    <div className={`relative p-3 sm:p-4 rounded-lg border-2 ${(userData.referral?.total_referrals || 0) >= 2
+                        ? 'border-green-500 bg-gradient-to-br from-green-500/20 to-emerald-500/20'
                         : 'border-muted bg-muted/20'
-                    }`}>
+                      }`}>
                       <div className="absolute -top-2 -right-2 bg-green-500 text-white text-[10px] sm:text-xs font-bold px-1.5 sm:px-2 py-0.5 rounded-full">
                         3rd+
                       </div>
@@ -990,7 +1002,6 @@ const Dashboard = () => {
                     </div>
                   </div>
 
-                  {/* Next Reward Info */}
                   <div className="p-2 sm:p-3 rounded-lg bg-primary/10 border border-primary/30">
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <div className="flex items-center gap-2">
@@ -1008,7 +1019,7 @@ const Dashboard = () => {
           </CardContent>
         </Card>
 
-        {/* RESPONSIVE Recent Activity */}
+        {/* Recent Activity */}
         <Card>
           <CardHeader className="pb-3 sm:pb-4">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">

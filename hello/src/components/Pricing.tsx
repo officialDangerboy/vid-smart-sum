@@ -124,7 +124,7 @@ const Pricing = () => {
           email: orderData.userData.email,
           contact: orderData.userData.contact,
         },
-        theme: { color: "#6366f1" },
+        theme: { color: "#ff0000" },
         handler: async function (response: any) {
           try {
             // Verify payment
