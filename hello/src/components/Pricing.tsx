@@ -1,16 +1,32 @@
-import { Button } from "@/components/ui/button";
-import { Check, Crown, Sparkles, Zap } from "lucide-react";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Check, Crown, Sparkles, Loader2, Zap } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+
+const API_URL = import.meta.env.VITE_API_URL || 'https://vid-smart-hhxnurt4s-leapsax.vercel.app';
+
+const loadRazorpay = () => {
+  return new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+};
 
 const Pricing = () => {
   const [isYearly, setIsYearly] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
 
   const plans = [
     {
       name: "Pro",
-      monthlyPrice: "$9.99",
-      yearlyPrice: "$99",
+      monthlyPrice: "₹799",
+      yearlyPrice: "₹7,999",
       period: isYearly ? "per year" : "per month",
+      planType: isYearly ? "pro_yearly" : "pro_monthly",
       description: "For serious learners and students",
       features: [
         "No API key needed",
@@ -27,18 +43,19 @@ const Pricing = () => {
       cta: "Upgrade to Pro",
       popular: true,
       icon: Crown,
-      savings: "Save $20",
+      savings: "Save ₹1,589",
     },
     {
       name: "Free",
-      monthlyPrice: "$0",
-      yearlyPrice: "$0",
+      monthlyPrice: "₹0",
+      yearlyPrice: "₹0",
       period: "forever",
+      planType: "free",
       description: "Perfect for trying out the extension",
       features: [
         "Add your own API key",
         "Videos under 20 minutes",
-        "20 summaries per day",
+        "3 summaries per day",
         "Basic AI summaries",
         "Full transcript access",
         "Email support",
@@ -49,8 +66,131 @@ const Pricing = () => {
     },
   ];
 
-  const handleGetStarted = () => {
-    window.location.href = "/login";
+  const handlePayment = async (plan: any) => {
+    if (plan.planType === "free") {
+      window.location.href = "/login";
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const token = localStorage.getItem("authToken");
+      
+      if (!token) {
+        toast({
+          title: "Please Login First",
+          description: "You need to be logged in to upgrade",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/login";
+        }, 1500);
+        return;
+      }
+
+      // Load Razorpay script
+      const scriptLoaded = await loadRazorpay();
+      if (!scriptLoaded) {
+        throw new Error("Failed to load payment gateway. Please check your internet connection.");
+      }
+
+      // Create order
+      const orderResponse = await fetch(`${API_URL}/api/payment/create-order`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ planType: plan.planType }),
+      });
+
+      const orderData = await orderResponse.json();
+      if (!orderData.success) throw new Error(orderData.message || "Failed to create order");
+
+      // Open Razorpay checkout
+      const options = {
+        key: orderData.keyId,
+        amount: orderData.order.amount,
+        currency: orderData.order.currency,
+        name: "VidSmartSum",
+        description: `${plan.name} Plan - ${plan.period}`,
+        order_id: orderData.order.id,
+        prefill: {
+          name: orderData.userData.name,
+          email: orderData.userData.email,
+          contact: orderData.userData.contact,
+        },
+        theme: { color: "#6366f1" },
+        handler: async function (response: any) {
+          try {
+            // Verify payment
+            const verifyResponse = await fetch(`${API_URL}/api/payment/verify`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                planType: plan.planType,
+              }),
+            });
+
+            const verifyData = await verifyResponse.json();
+            if (!verifyData.success) throw new Error(verifyData.message || "Payment verification failed");
+
+            toast({
+              title: "🎉 Payment Successful!",
+              description: "Welcome to Pro! Redirecting to dashboard...",
+            });
+
+            setTimeout(() => {
+              window.location.href = "/dashboard";
+            }, 2000);
+          } catch (error: any) {
+            toast({
+              title: "Verification Failed",
+              description: error.message,
+              variant: "destructive",
+            });
+          } finally {
+            setLoading(false);
+          }
+        },
+        modal: {
+          ondismiss: function() {
+            setLoading(false);
+            toast({
+              title: "Payment Cancelled",
+              description: "You can try again anytime",
+            });
+          }
+        }
+      };
+
+      const rzp = new (window as any).Razorpay(options);
+      
+      rzp.on("payment.failed", function (response: any) {
+        toast({
+          title: "Payment Failed",
+          description: response.error.description || "Payment could not be processed",
+          variant: "destructive",
+        });
+        setLoading(false);
+      });
+      
+      rzp.open();
+    } catch (error: any) {
+      console.error("Payment error:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
+      setLoading(false);
+    }
   };
 
   return (
@@ -77,6 +217,7 @@ const Pricing = () => {
           <div className="inline-flex items-center gap-4 p-1 rounded-full bg-background/50 backdrop-blur-sm border border-border/50 shadow-lg">
             <button
               onClick={() => setIsYearly(false)}
+              disabled={loading}
               className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all duration-300 ${
                 !isYearly
                   ? "bg-gradient-to-r from-primary to-accent text-white shadow-lg"
@@ -87,6 +228,7 @@ const Pricing = () => {
             </button>
             <button
               onClick={() => setIsYearly(true)}
+              disabled={loading}
               className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all duration-300 relative ${
                 isYearly
                   ? "bg-gradient-to-r from-primary to-accent text-white shadow-lg"
@@ -166,7 +308,7 @@ const Pricing = () => {
                       {plan.popular && isYearly && (
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-green-500 font-semibold">{plan.savings}</span>
-                          <span className="text-xs text-muted-foreground line-through">${(9.99 * 12).toFixed(0)}</span>
+                          <span className="text-xs text-muted-foreground line-through">₹{(799 * 12).toFixed(0)}</span>
                         </div>
                       )}
                     </div>
@@ -189,7 +331,8 @@ const Pricing = () => {
 
                     {/* CTA Button */}
                     <Button
-                      onClick={handleGetStarted}
+                      onClick={() => handlePayment(plan)}
+                      disabled={loading}
                       className={`w-full transition-all duration-300 ${
                         plan.popular
                           ? "bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl"
@@ -197,7 +340,14 @@ const Pricing = () => {
                       }`}
                       size="lg"
                     >
-                      {plan.cta}
+                      {loading ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Processing...
+                        </>
+                      ) : (
+                        plan.cta
+                      )}
                     </Button>
                   </div>
                 </div>
@@ -212,7 +362,7 @@ const Pricing = () => {
           <div className="flex flex-wrap justify-center gap-4 text-xs text-muted-foreground">
             <div className="flex items-center gap-2">
               <Check className="w-4 h-4 text-green-500" />
-              <span>No credit card required</span>
+              <span>No credit card required for free plan</span>
             </div>
             <div className="flex items-center gap-2">
               <Check className="w-4 h-4 text-green-500" />
@@ -220,7 +370,7 @@ const Pricing = () => {
             </div>
             <div className="flex items-center gap-2">
               <Check className="w-4 h-4 text-green-500" />
-              <span>30-day money back</span>
+              <span>Secure payments via Razorpay</span>
             </div>
           </div>
         </div>
