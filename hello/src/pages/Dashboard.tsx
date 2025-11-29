@@ -387,18 +387,6 @@ const Dashboard = () => {
           </Alert>
         )}
 
-        {/* Success Banner for New Pro Users */}
-        {isPro && (
-          <Alert className="mb-4 sm:mb-6 border-green-500/50 bg-green-500/10">
-            <Check className="h-4 w-4 text-green-500 shrink-0" />
-            <AlertDescription className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
-              <span className="text-xs sm:text-sm">
-                <strong>Welcome to {getPlanDisplayName()}!</strong> You now have unlimited access to all premium features. 🎉
-              </span>
-            </AlertDescription>
-          </Alert>
-        )}
-
         {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
           {/* Profile Card */}
