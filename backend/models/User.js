@@ -77,6 +77,39 @@ const usageLogSchema = new mongoose.Schema({
   }
 }, { _id: true });
 
+const paymentSchema = new mongoose.Schema({
+  orderId: {
+    type: String,
+    required: true
+  },
+  paymentId: {
+    type: String,
+    required: true
+  },
+  amount: {
+    type: Number,
+    required: true
+  },
+  currency: {
+    type: String,
+    default: 'INR'
+  },
+  status: {
+    type: String,
+    enum: ['created', 'authorized', 'captured', 'refunded', 'failed'],
+    required: true
+  },
+  method: String,
+  planType: {
+    type: String,
+    enum: ['pro_monthly', 'pro_yearly']
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+}, { _id: true });
+
 const referralSchema = new mongoose.Schema({
   code: {
     type: String,
@@ -179,7 +212,7 @@ const userSchema = new mongoose.Schema({
   subscription: {
     plan: {
       type: String,
-      enum: ['free', 'pro'],
+      enum: ['free', 'pro', 'pro_monthly', 'pro_yearly'], // ✅ ADDED Razorpay plans
       default: 'free'
     },
     status: {
@@ -203,6 +236,8 @@ const userSchema = new mongoose.Schema({
       default: false
     },
     cancelled_at: Date,
+    
+    // Stripe (keep for backward compatibility)
     stripe_customer_id: {
       type: String,
       unique: true,
@@ -212,6 +247,22 @@ const userSchema = new mongoose.Schema({
       type: String,
       unique: true,
       sparse: true
+    },
+    
+    // ✅ NEW: Razorpay support
+    razorpay_customer_id: {
+      type: String,
+      unique: true,
+      sparse: true
+    },
+    razorpay_subscription_id: {
+      type: String,
+      unique: true,
+      sparse: true
+    },
+    auto_renew: {
+      type: Boolean,
+      default: false
     }
   },
 
@@ -358,6 +409,8 @@ const userSchema = new mongoose.Schema({
   // Referral System
   referral: referralSchema,
 
+  payments: [paymentSchema],
+
   // Transaction History
   credit_transactions: [creditTransactionSchema],
 
@@ -393,7 +446,10 @@ const userSchema = new mongoose.Schema({
 // ============================================
 
 userSchema.virtual('is_premium').get(function() {
-  return this.subscription.plan === 'pro';
+  // ✅ UPDATED: Include new Razorpay plans
+  return this.subscription.plan === 'pro' || 
+         this.subscription.plan === 'pro_monthly' || 
+         this.subscription.plan === 'pro_yearly';
 });
 
 userSchema.virtual('credit_percentage').get(function() {
@@ -584,7 +640,8 @@ userSchema.methods.resetMonthlyCredits = async function() {
   }
 };
 
-userSchema.methods.upgradeSubscription = async function(plan, billingCycle, stripeData = {}) {
+// ✅ UPDATED: Support Razorpay upgrades
+userSchema.methods.upgradeSubscription = async function(plan, billingCycle, paymentData = {}) {
   const previousPlan = this.subscription.plan;
   
   this.subscription.plan = plan;
@@ -592,17 +649,27 @@ userSchema.methods.upgradeSubscription = async function(plan, billingCycle, stri
   this.subscription.status = 'active';
   this.subscription.started_at = new Date();
   
-  if (stripeData.customerId) {
-    this.subscription.stripe_customer_id = stripeData.customerId;
+  // Stripe support (backward compatibility)
+  if (paymentData.stripeCustomerId) {
+    this.subscription.stripe_customer_id = paymentData.stripeCustomerId;
   }
-  if (stripeData.subscriptionId) {
-    this.subscription.stripe_subscription_id = stripeData.subscriptionId;
+  if (paymentData.stripeSubscriptionId) {
+    this.subscription.stripe_subscription_id = paymentData.stripeSubscriptionId;
   }
-  if (stripeData.currentPeriodStart) {
-    this.subscription.current_period_start = stripeData.currentPeriodStart;
+  
+  // ✅ NEW: Razorpay support
+  if (paymentData.razorpayCustomerId) {
+    this.subscription.razorpay_customer_id = paymentData.razorpayCustomerId;
   }
-  if (stripeData.currentPeriodEnd) {
-    this.subscription.current_period_end = stripeData.currentPeriodEnd;
+  if (paymentData.razorpaySubscriptionId) {
+    this.subscription.razorpay_subscription_id = paymentData.razorpaySubscriptionId;
+  }
+  
+  if (paymentData.currentPeriodStart) {
+    this.subscription.current_period_start = paymentData.currentPeriodStart;
+  }
+  if (paymentData.currentPeriodEnd) {
+    this.subscription.current_period_end = paymentData.currentPeriodEnd;
   }
   
   this.updateFeatureAccess();
@@ -628,10 +695,11 @@ userSchema.methods.upgradeSubscription = async function(plan, billingCycle, stri
   };
 };
 
-// ✅ UPDATED: Feature access with new limits
+// ✅ UPDATED: Support all plan types
 userSchema.methods.updateFeatureAccess = function() {
   const plan = this.subscription.plan;
   
+  // Free plan
   if (plan === 'free') {
     this.features.unlimited_summaries = false;
     this.features.unlimited_video_length = false;
@@ -639,11 +707,12 @@ userSchema.methods.updateFeatureAccess = function() {
     this.features.export_summaries = false;
     this.features.priority_support = false;
     
-    this.usage.limits.daily_summaries = 3;  // ✅ CHANGED: 3 per day
-    this.usage.limits.monthly_summaries = 50;  // ✅ CHANGED: 50 per month
+    this.usage.limits.daily_summaries = 3;
+    this.usage.limits.monthly_summaries = 50;
     this.usage.limits.video_duration_seconds = 1200;
-    
-  } else if (plan === 'pro') {
+  } 
+  // Pro plans (all variants)
+  else if (plan === 'pro' || plan === 'pro_monthly' || plan === 'pro_yearly') {
     this.features.unlimited_summaries = true;
     this.features.unlimited_video_length = true;
     this.features.premium_ai_models = true;

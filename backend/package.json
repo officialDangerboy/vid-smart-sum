@@ -9,9 +9,9 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.80.0",
+    "axios": "^1.13.2",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
-    "axios": "^1.6.0",
     "crypto": "^1.0.1",
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
@@ -22,7 +22,8 @@
     "mongoose": "^8.19.2",
     "node-cron": "^3.0.3",
     "passport": "^0.7.0",
-    "passport-google-oauth20": "^2.0.0"
+    "passport-google-oauth20": "^2.0.0",
+    "razorpay": "^2.9.6"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

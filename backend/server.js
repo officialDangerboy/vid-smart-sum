@@ -45,7 +45,6 @@ app.use(helmet({
 app.use(cookieParser());
 
 // CORS with credentials
-// CORS with credentials
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',')
   : [process.env.FRONTEND_URL];
@@ -75,12 +74,18 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-razorpay-signature'], // ✅ ADDED
   exposedHeaders: ['set-cookie']
 }));
 
 // Handle preflight requests explicitly
 app.options('*', cors());
+
+// ============================================
+// WEBHOOK RAW BODY PARSER (CRITICAL!)
+// ============================================
+// ⚠️ MUST BE BEFORE express.json()
+app.use('/api/payment/webhook', express.raw({ type: 'application/json' }));
 
 // ============================================
 // BODY PARSERS
@@ -123,11 +128,23 @@ if (process.env.NODE_ENV === 'development') {
 // RATE LIMITING
 // ============================================
 const apiLimiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
   message: {
     error: 'Too many requests',
     code: 'RATE_LIMIT_EXCEEDED'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// ✅ PAYMENT RATE LIMITER
+const paymentLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // 10 payment requests per 15 minutes
+  message: {
+    error: 'Too many payment requests',
+    code: 'PAYMENT_RATE_LIMIT_EXCEEDED'
   },
   standardHeaders: true,
   legacyHeaders: false,
@@ -143,6 +160,9 @@ app.use('/auth', require('./routes/auth'));
 // API routes (with rate limiting)
 app.use('/api', apiLimiter, require('./routes/api'));
 
+// ✅ PAYMENT ROUTES (with payment rate limiter)
+app.use('/api/payment', paymentLimiter, require('./routes/payment'));
+
 // ============================================
 // HEALTH CHECK
 // ============================================
@@ -152,7 +172,8 @@ app.get('/', (req, res) => {
     status: 'active',
     version: '2.0.0',
     timestamp: new Date().toISOString(),
-    auth_method: 'JWT + Google OAuth'
+    auth_method: 'JWT + Google OAuth',
+    payment_gateway: 'Razorpay' // ✅ ADDED
   });
 });
 
@@ -252,6 +273,7 @@ const server = app.listen(PORT, () => {
   console.log('   ================================================');
   console.log(`   🌐 Server: http://localhost:${PORT}`);
   console.log(`   🔐 Auth: JWT + Google OAuth`);
+  console.log(`   💳 Payment: Razorpay Integration`); // ✅ ADDED
   console.log(`   📊 Environment: ${process.env.NODE_ENV}`);
   console.log(`   ⏰ Cron Jobs: ${process.env.ENABLE_CRON_JOBS !== 'false' ? 'Enabled' : 'Disabled'}`);
   console.log(`   🛡️  Rate Limit: ${process.env.RATE_LIMIT_MAX_REQUESTS || 100} requests per ${(parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 900000) / 60000} minutes`);
