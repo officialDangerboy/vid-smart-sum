@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
-const { protect } = require('../middleware/auth');
+const { authenticateJWT: protect } = require('../middleware/auth'); // ✅ FIXED
 const User = require('../models/User');
 
 // Initialize Razorpay
@@ -91,6 +91,7 @@ router.post('/verify', protect, async (req, res) => {
 
     // Update user subscription
     const plan = PLANS[planType];
+    const startDate = new Date();
     const endDate = new Date();
     endDate.setDate(endDate.getDate() + plan.duration);
 
@@ -100,9 +101,11 @@ router.post('/verify', protect, async (req, res) => {
         $set: {
           'subscription.plan': planType,
           'subscription.status': 'active',
-          'subscription.startDate': new Date(),
-          'subscription.endDate': endDate,
-          'subscription.autoRenew': true,
+          'subscription.billing_cycle': planType === 'pro_monthly' ? 'monthly' : 'yearly',
+          'subscription.started_at': startDate,
+          'subscription.current_period_start': startDate,
+          'subscription.current_period_end': endDate,
+          'subscription.auto_renew': true,
         },
         $push: {
           payments: {
@@ -120,6 +123,10 @@ router.post('/verify', protect, async (req, res) => {
       { new: true }
     ).select('-password');
 
+    // Update feature access
+    updatedUser.updateFeatureAccess();
+    await updatedUser.save();
+
     res.json({
       success: true,
       message: 'Payment verified successfully',
@@ -132,7 +139,7 @@ router.post('/verify', protect, async (req, res) => {
 });
 
 // Webhook Handler
-router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+router.post('/webhook', async (req, res) => {
   try {
     const webhookSignature = req.headers['x-razorpay-signature'];
     const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
@@ -141,26 +148,33 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       return res.status(400).json({ error: 'Invalid signature' });
     }
 
+    // Get raw body for signature verification
+    const body = req.body.toString('utf8');
+    
     const expectedSignature = crypto
       .createHmac('sha256', webhookSecret)
-      .update(JSON.stringify(req.body))
+      .update(body)
       .digest('hex');
 
     if (webhookSignature !== expectedSignature) {
+      console.error('Webhook signature verification failed');
       return res.status(400).json({ error: 'Signature verification failed' });
     }
 
-    const event = req.body.event;
-    const payload = req.body.payload.payment.entity;
+    // Parse the body
+    const event = JSON.parse(body);
+    const eventType = event.event;
+    const payload = event.payload.payment.entity;
 
-    console.log('Webhook event:', event);
+    console.log('Webhook event:', eventType);
 
-    if (event === 'payment.captured') {
+    if (eventType === 'payment.captured') {
       const userId = payload.notes.userId;
       const planType = payload.notes.planType;
       const plan = PLANS[planType];
 
       if (userId && plan) {
+        const startDate = new Date();
         const endDate = new Date();
         endDate.setDate(endDate.getDate() + plan.duration);
 
@@ -168,8 +182,8 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
           $set: {
             'subscription.plan': planType,
             'subscription.status': 'active',
-            'subscription.startDate': new Date(),
-            'subscription.endDate': endDate,
+            'subscription.current_period_start': startDate,
+            'subscription.current_period_end': endDate,
           },
         });
 
@@ -191,8 +205,9 @@ router.post('/cancel-subscription', protect, async (req, res) => {
       req.user._id,
       {
         $set: {
-          'subscription.autoRenew': false,
-          'subscription.cancelledAt': new Date(),
+          'subscription.auto_renew': false,
+          'subscription.cancel_at_period_end': true,
+          'subscription.cancelled_at': new Date(),
         },
       },
       { new: true }
@@ -201,6 +216,16 @@ router.post('/cancel-subscription', protect, async (req, res) => {
     res.json({ success: true, message: 'Subscription cancelled', user: updatedUser });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to cancel' });
+  }
+});
+
+// Get Payment History
+router.get('/history', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('payments');
+    res.json({ success: true, payments: user.payments || [] });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to fetch history' });
   }
 });
 
