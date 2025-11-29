@@ -74,8 +74,10 @@ const Pricing = () => {
 
     try {
       setLoading(true);
-      const token = localStorage.getItem("authToken");
-      
+
+      // ✅ FIXED: Use "accessToken" instead of "authToken"
+      const token = localStorage.getItem("accessToken");
+
       if (!token) {
         toast({
           title: "Please Login First",
@@ -99,13 +101,15 @@ const Pricing = () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${token}`, // ✅ Now uses correct token
         },
         body: JSON.stringify({ planType: plan.planType }),
       });
 
       const orderData = await orderResponse.json();
-      if (!orderData.success) throw new Error(orderData.message || "Failed to create order");
+      if (!orderData.success) {
+        throw new Error(orderData.message || "Failed to create order");
+      }
 
       // Open Razorpay checkout
       const options = {
@@ -128,7 +132,7 @@ const Pricing = () => {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
+                Authorization: `Bearer ${token}`, // ✅ Uses correct token
               },
               body: JSON.stringify({
                 razorpay_order_id: response.razorpay_order_id,
@@ -139,7 +143,9 @@ const Pricing = () => {
             });
 
             const verifyData = await verifyResponse.json();
-            if (!verifyData.success) throw new Error(verifyData.message || "Payment verification failed");
+            if (!verifyData.success) {
+              throw new Error(verifyData.message || "Payment verification failed");
+            }
 
             toast({
               title: "🎉 Payment Successful!",
@@ -160,7 +166,7 @@ const Pricing = () => {
           }
         },
         modal: {
-          ondismiss: function() {
+          ondismiss: function () {
             setLoading(false);
             toast({
               title: "Payment Cancelled",
@@ -171,7 +177,7 @@ const Pricing = () => {
       };
 
       const rzp = new (window as any).Razorpay(options);
-      
+
       rzp.on("payment.failed", function (response: any) {
         toast({
           title: "Payment Failed",
@@ -180,7 +186,7 @@ const Pricing = () => {
         });
         setLoading(false);
       });
-      
+
       rzp.open();
     } catch (error: any) {
       console.error("Payment error:", error);
@@ -199,7 +205,7 @@ const Pricing = () => {
       <div className="absolute inset-0 bg-gradient-to-b from-transparent via-secondary/5 to-transparent pointer-events-none" />
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/5 rounded-full blur-[150px] pointer-events-none" />
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-accent/5 rounded-full blur-[150px] pointer-events-none" />
-      
+
       <div className="container mx-auto px-4 sm:px-6 relative z-10">
         <div className="text-center mb-12 md:mb-16">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-primary/30 mb-6 bg-primary/5">
@@ -218,22 +224,20 @@ const Pricing = () => {
             <button
               onClick={() => setIsYearly(false)}
               disabled={loading}
-              className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all duration-300 ${
-                !isYearly
+              className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all duration-300 ${!isYearly
                   ? "bg-gradient-to-r from-primary to-accent text-white shadow-lg"
                   : "text-muted-foreground hover:text-foreground"
-              }`}
+                }`}
             >
               Monthly
             </button>
             <button
               onClick={() => setIsYearly(true)}
               disabled={loading}
-              className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all duration-300 relative ${
-                isYearly
+              className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all duration-300 relative ${isYearly
                   ? "bg-gradient-to-r from-primary to-accent text-white shadow-lg"
                   : "text-muted-foreground hover:text-foreground"
-              }`}
+                }`}
             >
               Yearly
               <span className="absolute -top-2 -right-2 px-2 py-0.5 bg-green-500 text-white text-xs rounded-full font-semibold">
@@ -249,9 +253,8 @@ const Pricing = () => {
             return (
               <div
                 key={index}
-                className={`relative group ${
-                  plan.popular ? "md:-translate-y-4" : ""
-                }`}
+                className={`relative group ${plan.popular ? "md:-translate-y-4" : ""
+                  }`}
               >
                 {/* Popular badge */}
                 {plan.popular && (
@@ -264,11 +267,10 @@ const Pricing = () => {
                 )}
 
                 <div
-                  className={`relative bg-background/50 backdrop-blur-sm rounded-3xl p-6 md:p-8 border transition-all duration-500 h-full ${
-                    plan.popular
+                  className={`relative bg-background/50 backdrop-blur-sm rounded-3xl p-6 md:p-8 border transition-all duration-500 h-full ${plan.popular
                       ? "border-primary/50 shadow-2xl shadow-primary/20 hover:shadow-primary/30"
                       : "border-border/50 hover:border-primary/30 hover:shadow-xl"
-                  }`}
+                    }`}
                 >
                   {/* Gradient overlay */}
                   {plan.popular && (
@@ -278,14 +280,12 @@ const Pricing = () => {
                   <div className="relative z-10">
                     {/* Icon and Name */}
                     <div className="flex items-center gap-3 mb-4">
-                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-                        plan.popular
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${plan.popular
                           ? "bg-gradient-to-br from-primary to-accent"
                           : "bg-primary/10"
-                      }`}>
-                        <PlanIcon className={`w-6 h-6 ${
-                          plan.popular ? "text-white" : "text-primary"
-                        }`} />
+                        }`}>
+                        <PlanIcon className={`w-6 h-6 ${plan.popular ? "text-white" : "text-primary"
+                          }`} />
                       </div>
                       <div>
                         <h3 className="text-2xl font-bold">{plan.name}</h3>
@@ -296,11 +296,10 @@ const Pricing = () => {
                     {/* Price */}
                     <div className="mb-6">
                       <div className="flex items-baseline gap-2 mb-1">
-                        <span className={`text-4xl md:text-5xl font-bold ${
-                          plan.popular
+                        <span className={`text-4xl md:text-5xl font-bold ${plan.popular
                             ? "bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent"
                             : "text-foreground"
-                        }`}>
+                          }`}>
                           {isYearly ? plan.yearlyPrice : plan.monthlyPrice}
                         </span>
                         <span className="text-muted-foreground text-sm">/{plan.period}</span>
@@ -317,11 +316,10 @@ const Pricing = () => {
                     <ul className="space-y-3 mb-8">
                       {plan.features.map((feature, i) => (
                         <li key={i} className="flex items-start gap-3">
-                          <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${
-                            plan.popular
+                          <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${plan.popular
                               ? "bg-primary/20"
                               : "bg-primary/10"
-                          }`}>
+                            }`}>
                             <Check className="w-3 h-3 text-primary" />
                           </div>
                           <span className="text-sm text-foreground">{feature}</span>
@@ -333,11 +331,10 @@ const Pricing = () => {
                     <Button
                       onClick={() => handlePayment(plan)}
                       disabled={loading}
-                      className={`w-full transition-all duration-300 ${
-                        plan.popular
+                      className={`w-full transition-all duration-300 ${plan.popular
                           ? "bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl"
                           : "bg-background/50 border border-border/50 hover:bg-primary/10 hover:border-primary/30"
-                      }`}
+                        }`}
                       size="lg"
                     >
                       {loading ? (

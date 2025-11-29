@@ -83,7 +83,7 @@ const OAuthCallback = () => {
             accessToken,
             refreshToken
           }, window.location.origin);
-          console.log('📤 Tokens synced to extension');
+          console.log('📤 Tokens synced to extension');a
         } catch (e) {
           console.log('⚠️ Extension not installed');
         }
